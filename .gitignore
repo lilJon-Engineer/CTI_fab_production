@@ -1,0 +1,26 @@
+# --- Reticle / mask data must never be committed ---
+*.gds
+*.gds2
+*.gdsii
+*.oas
+*.oasis
+*.GDS
+*.OAS
+
+# Locally generated data (device tables, batches, reports, real configs)
+mask_yield_tracker/local/*
+!mask_yield_tracker/local/README.txt
+**/extracted/
+**/batches/
+**/reports/
+*.local.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/

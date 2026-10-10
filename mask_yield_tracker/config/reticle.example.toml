@@ -1,0 +1,68 @@
+# Reticle extraction config (template).
+#
+# Copy this file to  local/<name>.local.toml  and fill in the values for your
+# reticle. Real configs stay local (*.local.toml and local/ are gitignored).
+# The values below match the synthetic test reticle built by
+# examples/synthetic/make_synthetic_gds.py.
+#
+# Run `python -m mty list <reticle>` to see the cells and layers in a file.
+
+config_version = 1
+
+[gate]
+file = ""                    # empty = the reticle file given on the command line
+top_cell = "SYN_top_Gate"
+layer = 1
+datatype = 0
+cell_suffix = "_Gate"        # stripped from cell names to get the device name
+
+[sd]
+enabled = true
+file = ""                    # empty = same file as the gate reticle
+top_cell = "SYN_top_SD"
+layer = 2
+datatype = 0
+cell_suffix = "_SD"
+
+# Device groups. Each entry is a container cell *stem* (suffix is added per
+# reticle: "Logic_top" -> "Logic_top_Gate" / "Logic_top_SD").
+# Every child placement of a container is one inspection site.
+# With split = true, each geometry-bearing sub-cell of a device becomes its
+# own site instead (used for PCM cells that hold several sub-devices).
+[[groups]]
+name = "Logic_top"
+
+[[groups]]
+name = "PCM_top"
+split = true
+
+[[groups]]
+name = "Litho_top"
+
+[text]
+# Cells whose names match any of these regexes are text/labels: they and
+# everything below them are ignored.
+cell_patterns = [
+  '^Letter_',
+  '^Digit_',
+  '^[A-Za-z]\$\$',
+]
+
+[split]
+# Sub-cells of a split device that are not sites (pads, frames, vias, ...).
+exclude_patterns = [
+  '^PCM_frame',
+  '^Pad_',
+]
+# Shapes drawn directly in a split device cell (routing, long lines) are
+# collected into one extra site named "<device>/_wires".
+own_shapes_site = true
+
+[geometry]
+ignore_triangles = true      # 3-point polygons are serifs/fillets, not features
+min_finger_aspect = 5.0      # length / width for a line to count as a finger
+long_line_um = 100.0         # straight or bent lines at least this long -> "long_line"
+dense_space_factor = 3.0     # space >= factor * CD  -> isolated, else dense (provisional)
+
+[pairing]
+min_coverage = 0.5           # fallback pairing: fraction of the gate site bbox the S/D site must cover

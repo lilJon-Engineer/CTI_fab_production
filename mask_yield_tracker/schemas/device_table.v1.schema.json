@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mty.device_table.v1",
+  "title": "Device table (one row per inspection site in the reticle field)",
+  "type": "object",
+  "required": ["schema", "version", "source", "field", "groups", "devices"],
+  "properties": {
+    "schema": {"const": "mty.device_table"},
+    "version": {"const": 1},
+    "generator": {"type": "string"},
+    "created": {"type": "string", "format": "date-time"},
+    "source": {
+      "type": "object",
+      "required": ["gate_file", "gate_sha256", "dbu_um"],
+      "properties": {
+        "gate_file": {"type": "string"},
+        "gate_sha256": {"type": "string"},
+        "sd_file": {"type": ["string", "null"]},
+        "sd_sha256": {"type": ["string", "null"]},
+        "dbu_um": {"type": "number"},
+        "config": {"type": "object"}
+      }
+    },
+    "field": {
+      "type": "object",
+      "properties": {"bbox_um": {"$ref": "#/$defs/box"}}
+    },
+    "groups": {"type": "array", "items": {"type": "string"}},
+    "devices": {"type": "array", "items": {"$ref": "#/$defs/device"}}
+  },
+  "$defs": {
+    "box": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4,
+            "description": "[x0, y0, x1, y1] in um, reticle field (layout) coordinates"},
+    "device": {
+      "type": "object",
+      "required": ["id", "name", "group", "kind", "bbox_um", "center_um"],
+      "properties": {
+        "id": {"type": "string", "description": "<name>#<placement>; stable for a given reticle + config"},
+        "name": {"type": "string", "description": "Device name from the gate cell, '/'-joined for PCM sub-devices"},
+        "group": {"type": "string"},
+        "gate_cell": {"type": "string"},
+        "parent_cell": {"type": ["string", "null"]},
+        "sd_name": {"type": ["string", "null"]},
+        "sd_cell": {"type": ["string", "null"]},
+        "sd_match": {"enum": ["name", "name_only", "overlap", null]},
+        "sd_coverage": {"type": ["number", "null"]},
+        "kind": {"enum": ["finger_array", "single_line", "long_line", "other", "empty"]},
+        "bbox_um": {"$ref": "#/$defs/box"},
+        "center_um": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+        "cd_nm": {"type": ["number", "null"], "description": "Finger width"},
+        "n_fingers": {"type": "integer"},
+        "pitch_nm": {"type": ["number", "null"]},
+        "orientation": {"enum": ["h", "v", null], "description": "Finger direction in the field frame"},
+        "density": {"enum": ["isolated", "dense", null], "description": "Provisional: space >= k*CD -> isolated"},
+        "thinnest_nm": {"type": ["number", "null"]},
+        "widths_nm": {"type": "object", "additionalProperties": {"type": "integer"}},
+        "placement": {"type": "integer"},
+        "placements_total": {"type": "integer"},
+        "flags": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

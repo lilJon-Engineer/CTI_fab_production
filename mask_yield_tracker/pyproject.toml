@@ -1,0 +1,22 @@
+[project]
+name = "mask-yield-tracker"
+version = "0.1.0"
+description = "Photolithography yield tracking by CD across dose/focus splits"
+requires-python = ">=3.11"
+dependencies = ["klayout>=0.30"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+mty = "mty.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["mty*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
