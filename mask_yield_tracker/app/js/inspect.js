@@ -29,7 +29,9 @@ export async function renderInspect(root, [bid]) {
   const keyToMode = Object.fromEntries(modes.map((m) => [m.key, m.id]));
   const passIds = new Set(modes.filter((m) => m.pass).map((m) => m.id));
 
-  const view = { rot: 0, mirror: false, advance: true, ...loadView() };
+  const view = { rot: 0, mirror: false, advance: true, listNextDie: true, ...loadView() };
+  let watch = [...(batch.watchlist || [])];                         // inspection list (device ids, user order)
+  let listMode = false;                                             // step through the inspection list
   let outlines = null;            // drawn gate geometry per device (loaded in the background)
   let resistOutlines = null;      // thin resist features per device
   const GEOM_PX = 28;             // draw real geometry once a device is at least this big on screen
@@ -120,7 +122,7 @@ export async function renderInspect(root, [bid]) {
     if (!S.selected) return toast("Click a device first", true);
     const id = S.selected;
     setStatus([id], status);
-    if (status && view.advance) step(1, true);
+    if (status && view.advance) step(1, !listMode);
   }
 
   // ---------- filter ----------
@@ -134,6 +136,11 @@ export async function renderInspect(root, [bid]) {
     return [groups.indexOf(d.group), -Math.round(v / 50), u];
   }
   function applyFilter() {
+    if (listMode && watch.length) {
+      matching = baseMatching = watch.map((i) => devById[i]).filter(Boolean);
+      filterActive = true;
+      return;
+    }
     const f = S.filter;
     const text = f.text.trim().toLowerCase();
     filterActive = !!(f.cd || f.resist || f.group || f.kind || text);
@@ -167,6 +174,14 @@ export async function renderInspect(root, [bid]) {
 
   function step(dir, skipMarked = false) {
     if (!matching.length) return;
+    if (listMode && watch.length) {
+      const i = matching.findIndex((d) => d.id === S.selected);
+      const last = matching.length - 1;
+      if (i < 0) return select(matching[dir > 0 ? 0 : last].id, true);
+      if (dir > 0 && i === last && view.listNextDie) { stepDie(1); return select(matching[0].id, true); }
+      if (dir < 0 && i === 0 && view.listNextDie) { stepDie(-1); return select(matching[last].id, true); }
+      return select(matching[(i + dir + matching.length) % matching.length].id, true);
+    }
     let i = matching.findIndex((d) => d.id === S.selected);
     const res = resultsOf();
     for (let n = 0; n < matching.length; n++) {
@@ -179,6 +194,7 @@ export async function renderInspect(root, [bid]) {
     S.selected = id;
     if (id && reveal) ensureVisible(devById[id]);
     draw(); drawPanel();
+    if (listMode) drawToolbar();
   }
 
   // ---------- canvas drawing ----------
@@ -435,7 +451,7 @@ export async function renderInspect(root, [bid]) {
         h("span", {}, h("span", { class: "swatch none" }), "none inspected"),
         h("span", {}, "yield 0%", ...SEQ.map((v) => h("span", { class: "swatch", style: { background: `var(${v})`, width: "10px" } })), "100%")),
       h("p", { class: "small muted", style: { margin: "4px 0 0" } },
-        `Column header = dose (${batch.splits.dose_unit}). Yield = pass / inspected for ${filterActive ? "the highlighted devices" : "all devices"}; number in a die = yield %.`));
+        `Column header = dose (${batch.splits.dose_unit}). Yield = pass / inspected for ${listMode ? "the inspection list" : filterActive ? "the highlighted devices" : "all devices"}; number in a die = yield %.`));
   }
   function doseFocus(d) {
     const c = batch.splits.columns[d[0]] || {}, r = batch.splits.rows[d[1]] || {};
@@ -479,6 +495,40 @@ export async function renderInspect(root, [bid]) {
   };
   [cdSel, resistSel, groupSel, kindSel, openChk].forEach((e) => e.addEventListener("change", onFilter));
   textIn.addEventListener("input", onFilter);
+
+  // ---------- inspection list ----------
+  async function saveWatch() {
+    saveStatus.textContent = "Saving…";
+    try {
+      const b = await api.updateBatch(batch.id, { watchlist: watch });
+      batch.watchlist = watch = b.watchlist;
+      saveStatus.textContent = `Saved ${new Date().toLocaleTimeString()}`;
+    } catch (e) { saveStatus.textContent = "Not saved"; toast(`List not saved: ${e.message}`, true); }
+  }
+  function refreshList() {
+    if (listMode && !watch.length) listMode = false;
+    applyFilter(); draw(); drawWafer(); drawPanel(); drawToolbar();
+  }
+  function toggleWatch(id) {
+    if (!id) return toast("Select a device first", true);
+    watch = watch.includes(id) ? watch.filter((x) => x !== id) : [...watch, id];
+    refreshList(); saveWatch();
+  }
+  function moveWatch(id, dir) {
+    const i = watch.indexOf(id), j = i + dir;
+    if (i < 0 || j < 0 || j >= watch.length) return;
+    watch = [...watch]; [watch[i], watch[j]] = [watch[j], watch[i]];
+    refreshList(); saveWatch();
+  }
+  function setListMode(on) {
+    if (on && !watch.length) return toast("Add devices to the inspection list first (select a device, press A)", true);
+    listMode = on;
+    applyFilter();
+    if (on && !watch.includes(S.selected)) S.selected = watch.find((i) => devById[i]) || null;
+    if (S.selected) ensureVisible(devById[S.selected]);
+    draw(); drawWafer(); drawPanel(); drawToolbar();
+  }
+  const ids = h("datalist", { id: "mty-device-ids" }, devices.map((d) => h("option", { value: d.id })));
 
   // ---------- right panel ----------
   const panel = h("div");
@@ -528,17 +578,18 @@ export async function renderInspect(root, [bid]) {
         : h("p", { class: "small muted" }, "Click a device on the field. Keys: ",
           modes.map((m) => [h("kbd", {}, m.key.toUpperCase()), ` ${m.label.toLowerCase()} `]), h("kbd", {}, "U"), " clear, ",
           h("kbd", {}, "N"), "/", h("kbd", {}, "B"), " next/previous device, ", h("kbd", {}, "]"), "/", h("kbd", {}, "["), " next/previous die, ",
-          h("kbd", {}, "F"), " fit, ", h("kbd", {}, "Z"), " zoom to device."),
-      h("label", { class: "small" }, advChk, " after marking, jump to the next unmarked device"),
-      h("h3", {}, filterActive ? `Highlighted devices (${matching.length})` : `All devices (${matching.length})`),
-      unmarked.length && modes.some((m) => m.pass)
+          h("kbd", {}, "F"), " fit, ", h("kbd", {}, "Z"), " zoom to device, ", h("kbd", {}, "A"), " add/remove from the inspection list."),
+      h("label", { class: "small" }, advChk, listMode ? " after marking, jump to the next device in the list" : " after marking, jump to the next unmarked device"),
+      listPanel(res),
+      listMode ? null : h("h3", {}, filterActive ? `Highlighted devices (${matching.length})` : `All devices (${matching.length})`),
+      !listMode && unmarked.length && modes.some((m) => m.pass)
         ? h("button", {
           class: "btn small", onclick: () => {
             const passMode = modes.find((m) => m.pass);
             if (confirm(`Mark ${unmarked.length} unmarked ${filterActive ? "highlighted " : ""}device(s) in die ${dieKey()} as ${passMode.label}?`)) setStatus(unmarked.map((d) => d.id), passMode.id);
           },
         }, `Mark ${unmarked.length} unmarked as ${modes.find((m) => m.pass).label}`) : null,
-      h("div", { class: "devlist" }, matching.slice(0, 2000).map((d) => {
+      listMode ? null : h("div", { class: "devlist" }, matching.slice(0, 2000).map((d) => {
         const s = res[d.id]?.status, m = s && state.modeById[s];
         return h("div", { class: d.id === S.selected ? "sel" : "", onclick: () => select(d.id, true) },
           m ? h("span", { class: "swatch", style: { background: m.color } }, m.key.toUpperCase()) : h("span", { class: "swatch none" }),
@@ -546,6 +597,44 @@ export async function renderInspect(root, [bid]) {
             : d.cd_nm !== null ? `${fmt(d.cd_nm)} nm` : `~${fmt(d.thinnest_nm)}`));
       }))));
     panel.querySelector(".devlist .sel")?.scrollIntoView({ block: "nearest" });
+  }
+
+  function listPanel(res) {
+    const addIn = h("input", { type: "text", list: "mty-device-ids", placeholder: "add device by id, e.g. X002#1", style: { flex: "1", minWidth: "0" } });
+    const addTyped = () => {
+      const v = addIn.value.trim();
+      const id = devById[v] ? v : devices.find((d) => d.name === v)?.id;   // accept a bare name for single placements
+      if (!id) return toast(`No device "${v}"`, true);
+      if (!watch.includes(id)) { watch = [...watch, id]; refreshList(); saveWatch(); }
+      addIn.value = "";
+    };
+    addIn.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addTyped(); } });
+    const nextDie = h("input", { type: "checkbox", checked: view.listNextDie });
+    nextDie.onchange = () => { view.listNextDie = nextDie.checked; saveView(view); };
+    const sel = S.selected;
+    const done = watch.filter((i) => res[i]).length;
+    return h("div", { class: "watch" },
+      h("h3", {}, `Inspection list (${watch.length})`, watch.length ? h("span", { class: "small muted" }, `  ${done}/${watch.length} marked in this die`) : null),
+      h("div", { class: "row", style: { gap: "6px" } },
+        h("button", { class: "btn" + (listMode ? " primary" : ""), onclick: () => setListMode(!listMode), title: "step through the list with N / B" },
+          listMode ? "Stepping through list" : "Step through list"),
+        sel ? h("button", { class: "btn", onclick: () => toggleWatch(sel), title: "A" },
+          watch.includes(sel) ? "Remove selected " : "Add selected ", h("kbd", {}, "A")) : null),
+      h("div", { class: "row", style: { gap: "6px", marginTop: "6px" } }, addIn, h("button", { class: "btn", onclick: addTyped }, "Add")),
+      h("label", { class: "small" }, nextDie, " after the last device, go to the next die"),
+      watch.length ? h("div", { class: "devlist" }, watch.map((id, n) => {
+        const d = devById[id], st = res[id]?.status, m = st && state.modeById[st];
+        return h("div", { class: id === sel ? "sel" : "", onclick: () => select(id, true) },
+          h("span", { class: "muted", style: { width: "16px" } }, n + 1),
+          m ? h("span", { class: "swatch", style: { background: m.color } }, m.key.toUpperCase()) : h("span", { class: "swatch none" }),
+          d ? id : h("s", { title: "not in the current device table" }, id),
+          h("span", { class: "cd" }, d && d.cd_nm !== null ? `${fmt(d.cd_nm)} nm` : d ? `~${fmt(d.thinnest_nm)}` : ""),
+          h("button", { class: "mini", title: "move up", onclick: (e) => { e.stopPropagation(); moveWatch(id, -1); } }, "↑"),
+          h("button", { class: "mini", title: "move down", onclick: (e) => { e.stopPropagation(); moveWatch(id, 1); } }, "↓"),
+          h("button", { class: "mini", title: "remove", onclick: (e) => { e.stopPropagation(); toggleWatch(id); } }, "×"));
+      })) : h("p", { class: "small muted" }, "Select a device and press A (or type its id above) to build the list of devices you check in every die."),
+      watch.length ? h("button", { class: "btn small", style: { marginTop: "6px" },
+        onclick: () => { if (confirm("Clear the inspection list?")) { watch = []; listMode = false; refreshList(); saveWatch(); } } }, "Clear list") : null);
   }
 
   // ---------- toolbar ----------
@@ -557,6 +646,7 @@ export async function renderInspect(root, [bid]) {
       h("span", { class: "title" }, `Die ${dieKey()}`),
       h("span", { class: "muted small" }, `dose ${fmt(dose, 2)} ${batch.splits.dose_unit}` + (focus !== null ? ` · focus ${focus} ${batch.splits.focus_unit}` : "")),
       h("button", { class: "btn", onclick: () => stepDie(1), title: "next die ]" }, "▶"),
+      listMode ? h("span", { class: "badge" }, `List ${Math.max(1, watch.indexOf(S.selected) + 1)}/${watch.length}`) : null,
       h("span", { style: { marginLeft: "auto" } }),
       h("button", { class: "btn", onclick: fit, title: "F" }, "Fit"),
       h("button", { class: "btn", title: "rotate the field view 90°", onclick: () => { view.rot = (view.rot + 1) % 4; saveView(view); applyFilter(); fit(); drawPanel(); } }, `Rotate ${view.rot * 90}°`),
@@ -570,6 +660,7 @@ export async function renderInspect(root, [bid]) {
     const k = e.key.toLowerCase();
     if (keyToMode[k]) { mark(keyToMode[k]); e.preventDefault(); }
     else if (k === "u" || k === "backspace" || k === "delete") { mark(null); e.preventDefault(); }
+    else if (k === "a") toggleWatch(S.selected);
     else if (k === "n") step(1);
     else if (k === "b") step(-1);
     else if (k === "]") stepDie(1);
@@ -594,7 +685,7 @@ export async function renderInspect(root, [bid]) {
         h("a", { href: `/api/batches/${encodeURIComponent(batch.id)}/report?download=1` }, "download report")),
       stale ? h("p", { class: "small", style: { color: "var(--danger)" } },
         `The reticle was re-extracted after this batch was created.${unknown ? ` ${unknown} recorded result(s) refer to devices that no longer exist and are hidden.` : ""}`) : null,
-      waferBox,
+      waferBox, ids,
       h("div", { class: "filters" },
         h("label", { class: "field" }, "CD lookup (metal)", cdSel),
         h("label", { class: "field" }, "Resist lookup (masking)", resistSel),

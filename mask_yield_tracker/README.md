@@ -65,7 +65,20 @@ uploaded reticles, configs, device tables, drawn geometry and batch files.
 | U, Backspace | clear the result |
 | N / B | next / previous highlighted device |
 | ] / [ | next / previous die (the selected device stays selected) |
+| A | add / remove the selected device from the inspection list |
 | F / Z / Esc | fit field / zoom to device / deselect |
+
+**Inspection list.** Build a list of the devices you check in every die
+(select a device and press **A**, or type its id, e.g. `X002#1`, in the list
+box). Reorder with ↑ ↓. Click *Step through list*: **N / B** and the
+auto-advance after marking now follow your list order, and after the last
+device the app moves to the next die and selects the first device again (turn
+that off with *after the last device, go to the next die*). So per die: look,
+then press the status keys in list order. The wafer map shows the list's yield
+while stepping. The list is saved with the batch and appears in the report.
+
+**Die notes** typed in the right panel are saved with the batch and shown in
+the report.
 
 *Rotate* and *Mirror* change only the field view, to match what you see under
 the microscope. Batches can be exported to and imported from JSON
@@ -83,7 +96,10 @@ batch; *download report* saves it as a single offline `.html` file:
 - outcome mix per CD
 - thin resist and skating: skating rate vs narrowest resist, smallest resist
   area and anchoring (each × dose), and metal CD × narrowest resist
-- per-die wafer map and table (dose, focus, coverage, yield, 95 % interval, counts per mode)
+- inspection list: status of each listed device in every die, ordered by dose
+- per-die wafer map and table (dose, focus, coverage, yield, 95 % interval,
+  counts per mode, note; dies with a note are marked on the map) and a
+  *Die notes* section
 
 Yield = pass / inspected; sites without a result are left out and reported as
 coverage. CDs are finger widths; sites without fingers are grouped by their

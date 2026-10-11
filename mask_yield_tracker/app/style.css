@@ -95,3 +95,8 @@ dl.kv dd { margin: 0; overflow-wrap: anywhere; }
 .progress { height: 6px; background: var(--surface-0); border-radius: 3px; overflow: hidden; margin: 4px 0; }
 .progress > div { height: 100%; background: var(--accent); }
 a.btn { text-decoration: none; color: inherit; display: inline-block; }
+.devlist button.mini { border: 1px solid var(--border); background: var(--surface-2); border-radius: 3px; padding: 0 5px; font-size: 11px; cursor: pointer; line-height: 16px; }
+.devlist button.mini:first-of-type { margin-left: 6px; }
+.devlist button.mini:hover { background: var(--accent-soft); }
+.badge { background: var(--accent); color: #fff; border-radius: 10px; padding: 2px 8px; font-size: 12px; }
+.watch { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 2px; }

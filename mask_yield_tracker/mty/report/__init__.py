@@ -26,7 +26,7 @@ def write_report(batch: dict, table: dict, modes: list[dict], out_dir, stem: str
 
     dump("yield_by_cd_dose", [{**r, "cd": r["key"]} for r in agg["cd_cond"]], ["cd", "dose", "focus"] + yc)
     dump("yield_by_cd_pitch_dose", [{**r, "cd": r["key"]} for r in agg["cdpitch_cond"]], ["cd", "pitch_nm", "dose", "focus"] + yc)
-    dump("dies", agg["dies"], ["die", "col", "row", "dose", "focus"] + yc)
+    dump("dies", agg["dies"], ["die", "col", "row", "dose", "focus"] + yc + ["note"])
     dump("resist_by_dose", [{**r, "grouping": dim, "bin": r["key"]} for dim in ("width", "area", "anchor")
                             for r in agg["resist"][dim]["cond"]],
          ["grouping", "bin", "dose", "focus", "resist_fail", "resist_fail_rate"] + yc)

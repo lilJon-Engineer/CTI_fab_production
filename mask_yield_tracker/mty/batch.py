@@ -10,7 +10,8 @@
              "columns": [{"dose", "focus"}] * n_cols,     # column = dose step
              "rows":    [{"focus"}] * n_rows},            # optional focus per row
   "results": {"col,row": {device_id: {"status", "ts"}}},
-  "die_notes": {"col,row": "text"}
+  "die_notes": {"col,row": "text"},
+  "watchlist": [device_id, ...]                          # inspection list, in the user's order
 }
 Die (0, 0) is the top-left column/row of the grid. Focus for a die is the row
 value if set, else the column value.
@@ -117,6 +118,9 @@ def normalize(b: dict) -> dict:
     s["columns"], s["rows"] = cols, rows
     b.setdefault("results", {})
     b.setdefault("die_notes", {})
+    b["die_notes"] = {k: str(v) for k, v in b["die_notes"].items() if str(v).strip()}
+    seen = set()
+    b["watchlist"] = [i for i in (str(x) for x in b.get("watchlist", [])) if not (i in seen or seen.add(i))]
     b.setdefault("meta", {})
     return b
 

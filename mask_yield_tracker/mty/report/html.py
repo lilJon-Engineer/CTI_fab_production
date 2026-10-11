@@ -158,7 +158,9 @@ def wafer_map(batch: dict, dies: list[dict]) -> str:
             dash = "" if fill else ' stroke-dasharray="3 2"'
             out.append(f'<g><rect x="{x}" y="{y}" width="{cell}" height="{cell}" rx="3" fill="{fill or "#fff"}" stroke="#a9a8a2"{dash}/>'
                        f'<text x="{x + cell / 2}" y="{y + cell / 2 + 4}" text-anchor="middle" class="wv" fill="{ink}">{"" if d["yield"] is None else round(100 * d["yield"])}</text>'
-                       f'<title>Die {d["die"]}  dose {_num(d["dose"])}  {d["inspected"]}/{d["sites"]} inspected  yield {_pct(d["yield"])}</title></g>')
+                       + (f'<circle cx="{x + cell - 5}" cy="{y + 5}" r="3" fill="{INK2}"/>' if d.get("note") else "")
+                       + f'<title>Die {d["die"]}  dose {_num(d["dose"])}  {d["inspected"]}/{d["sites"]} inspected  yield {_pct(d["yield"])}'
+                       + (f'\nNote: {_e(d["note"])}' if d.get("note") else "") + '</title></g>')
     out.append("</svg>")
     return "".join(out)
 
@@ -205,13 +207,13 @@ def heat_table(rows_by_key: dict, row_labels: list[tuple[str, str]], conds: list
 
 def die_table(dies: list[dict], modes: list[dict], units: dict, focus_varies: bool) -> str:
     cols = ["Die", f"Dose ({units['dose_unit']})"] + ([f"Focus ({units['focus_unit']})"] if focus_varies else []) + \
-        ["Inspected", "Coverage", "Yield", "95% CI"] + [m["label"] for m in modes]
+        ["Inspected", "Coverage", "Yield", "95% CI"] + [m["label"] for m in modes] + ["Note"]
     out = ['<div class="scroll"><table class="list"><thead><tr>'] + [f"<th>{_e(c)}</th>" for c in cols] + ["</tr></thead><tbody>"]
     for d in sorted(dies, key=lambda d: (d["col"], d["row"])):
         cells = [d["die"], _num(d["dose"])] + ([_num(d["focus"])] if focus_varies else []) + [
             f'{d["inspected"]}/{d["sites"]}', _pct(d["coverage"]), _pct(d["yield"], 1),
             "–" if d["yield_lo"] is None else f'{_pct(d["yield_lo"])}–{_pct(d["yield_hi"])}'] + [d["modes"][m["id"]] for m in modes]
-        out.append("<tr>" + "".join(f"<td>{_e(c)}</td>" for c in cells) + "</tr>")
+        out.append("<tr>" + "".join(f"<td>{_e(c)}</td>" for c in cells) + f'<td class="note">{_e(d.get("note", ""))}</td></tr>')
     out.append("</tbody></table></div>")
     return "".join(out)
 
@@ -253,6 +255,10 @@ table.list th:first-child,table.list td:first-child{text-align:left}
 button{font:inherit;padding:6px 12px;border:1px solid #a9a8a2;background:#fff;border-radius:6px;cursor:pointer}
 button:hover{background:var(--bg)}
 details summary{cursor:pointer;color:var(--ink2);margin:8px 0}
+table.list td.note{text-align:left;white-space:normal;min-width:180px;max-width:420px}
+table.notes td,table.notes th{text-align:left}
+table.wl th small{display:block;font-size:9px;font-weight:400;color:var(--muted)}
+table.wl td{min-width:22px;font-weight:700;font-size:11px}table.wl td.sum{font-weight:400;color:var(--ink2);text-align:left;white-space:nowrap}
 @media (max-width:760px){.wafer-wrap{grid-template-columns:1fr}}
 @media print{body{background:#fff}.page{max-width:none;padding:0}.actions{display:none}.card,.tile{break-inside:avoid;border-color:#ccc}
  h2{break-after:avoid}details{display:block}details>*{display:block}}
@@ -282,7 +288,7 @@ document.getElementById("csv-resist").onclick = () => {
   for (const dim of ["width", "area", "anchor"]) for (const r of flat(A.resist?.[dim]?.cond || [])) rows.push(Object.assign({ grouping: dim, bin: r.key }, r));
   save(base + "_resist_by_dose.csv", csv(rows, ["grouping", "bin", "dose", "focus", "resist_fail", "resist_fail_rate", ...yc, ...mc]));
 };
-document.getElementById("csv-die").onclick = () => save(base + "_dies.csv", csv(flat(A.dies), ["die", "col", "row", "dose", "focus", ...yc, ...mc]));
+document.getElementById("csv-die").onclick = () => save(base + "_dies.csv", csv(flat(A.dies), ["die", "col", "row", "dose", "focus", ...yc, ...mc, "note"]));
 function resultRows() {
   const dev = Object.fromEntries(DATA.device_table.devices.map((d) => [d.id, d]));
   const sp = DATA.batch.splits, rows = [];
@@ -356,6 +362,8 @@ def build_report(batch: dict, table: dict, modes: list[dict]) -> str:
                                 modes, "Outcome by dose (share of inspected, all devices)", label_w=130, w=1100)
 
     resist_html = resist_section(agg, table, conds, cond_labels, fv)
+    notes_html = notes_section(agg["dies"], units, fv)
+    watch_html = watchlist_section(batch, table, modes)
 
     t = agg["total"]
     tiles = [("Dies", len(batch["wafer"]["dies"])), ("Results recorded", f'{t["inspected"]} / {t["sites"]}'),
@@ -399,16 +407,64 @@ def build_report(batch: dict, table: dict, modes: list[dict]) -> str:
 <h2>Failure modes</h2>
 <div class="card">{mode_by_cd}</div>
 
+{watch_html}
+
 {resist_html}
 
 <h2>Per die</h2>
 <div class="wafer-wrap"><div class="card">{wafer_map(batch, agg["dies"])}{legend_seq()}<p class="small muted">Column header = dose. Number = yield %.</p></div>
 <div class="card">{die_table(agg["dies"], modes, units, fv)}</div></div>
+{notes_html}
 </div>
 <script type="application/json" id="{DATA_ID}">{payload}</script>
 <script>{JS}</script>
 </body></html>
 """
+
+
+def notes_section(dies: list[dict], units: dict, fv: bool) -> str:
+    rows = [d for d in sorted(dies, key=lambda d: (d["col"], d["row"])) if d.get("note")]
+    if not rows:
+        return ""
+    body = "".join(f'<tr><td>{_e(d["die"])}</td><td>{_e(_num(d["dose"]))}</td>'
+                   + (f'<td>{_e(_num(d["focus"]))}</td>' if fv else "")
+                   + f'<td>{_pct(d["yield"], 1)}</td><td class="note">{_e(d["note"])}</td></tr>' for d in rows)
+    return (f'<h2>Die notes</h2><div class="card"><table class="list notes"><thead><tr><th>Die</th><th>Dose ({_e(units["dose_unit"])})</th>'
+            + (f'<th>Focus ({_e(units["focus_unit"])})</th>' if fv else "")
+            + f'<th>Yield</th><th>Note</th></tr></thead><tbody>{body}</tbody></table></div>')
+
+
+def watchlist_section(batch: dict, table: dict, modes: list[dict]) -> str:
+    """Status of every device on the inspection list in every die (columns ordered by dose)."""
+    ids = [i for i in batch.get("watchlist", [])]
+    if not ids:
+        return ""
+    dev = {d["id"]: d for d in table["devices"]}
+    mode = {m["id"]: m for m in modes}
+    cols = batch["splits"]["columns"]
+    dies = sorted(batch["wafer"]["dies"], key=lambda d: ((cols[d[0]].get("dose") if d[0] < len(cols) else None) is None,
+                                                         (cols[d[0]].get("dose") if d[0] < len(cols) else 0) or 0, d[0], d[1]))
+    head = "".join(f'<th title="die {c},{r}">{_e(_num(cols[c].get("dose")) if c < len(cols) and cols[c].get("dose") is not None else c)}<small>{c},{r}</small></th>'
+                   for c, r in dies)
+    body = []
+    for i in ids:
+        d = dev.get(i)
+        label = f'{i}' + (f' · {_num(d["cd_nm"])} nm' if d and d.get("cd_nm") is not None else "")
+        cells, counts = [], {m["id"]: 0 for m in modes}
+        for c, r in dies:
+            st = batch["results"].get(f"{c},{r}", {}).get(i, {}).get("status")
+            m = mode.get(st)
+            if m:
+                counts[m["id"]] += 1
+                cells.append(f'<td style="background:{m["color"]};color:#fff" title="{_e(i)} die {c},{r}: {_e(m["label"])}">{_e(m["key"].upper())}</td>')
+            else:
+                cells.append('<td class="na">·</td>')
+        summary = " ".join(f'{_e(m["key"].upper())}{counts[m["id"]]}' for m in modes if counts[m["id"]])
+        body.append(f'<tr><th>{_e(label)}</th>{"".join(cells)}<td class="sum">{summary}</td></tr>')
+    return ('<h2>Inspection list</h2><p class="small muted">Devices on the batch\'s inspection list: status in every die, '
+            'columns ordered by dose (die col,row below). Letters: ' + ", ".join(f'{_e(m["key"].upper())} = {_e(m["label"])}' for m in modes)
+            + f'.</p><div class="card"><div class="scroll"><table class="heat wl"><thead><tr><th>Device \\ dose</th>{head}<th></th></tr></thead>'
+            f'<tbody>{"".join(body)}</tbody></table></div></div>')
 
 
 def resist_section(agg: dict, table: dict, conds, cond_labels, fv) -> str:

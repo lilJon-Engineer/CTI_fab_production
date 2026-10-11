@@ -113,3 +113,25 @@ def test_csv_columns_unique(batch, table, tmp_path):
     for f in tmp_path.glob("*.csv"):
         header = f.read_text().splitlines()[0].split(",")
         assert len(header) == len(set(header)), f.name
+
+
+def test_notes_and_watchlist_in_report(batch, table, tmp_path):
+    batch["die_notes"] = {"0,0": "particles near PCM <edge>", "2,0": ""}
+    batch["watchlist"] = ["XA04#2", "XA03#1"]
+    from mty.batch import normalize
+    normalize(batch)
+    assert batch["die_notes"] == {"0,0": "particles near PCM <edge>"}          # empty notes dropped
+    html = build_report(batch, table, load_failure_modes())
+    assert "Die notes" in html and "particles near PCM &lt;edge&gt;" in html
+    assert "Inspection list" in html and "XA04#2" in html
+    agg = aggregate(batch, table, load_failure_modes())
+    assert agg["dies"][0]["note"] == "particles near PCM <edge>"
+    write_report(batch, table, load_failure_modes(), tmp_path)
+    dies_csv = (tmp_path / f"{batch['id']}_report_dies.csv").read_text()
+    assert "note" in dies_csv.splitlines()[0].split(",") and "particles near PCM <edge>" in dies_csv
+
+
+def test_watchlist_normalized(batch):
+    from mty.batch import normalize
+    batch["watchlist"] = ["A", "B", "A", 3]
+    assert normalize(batch)["watchlist"] == ["A", "B", "3"]

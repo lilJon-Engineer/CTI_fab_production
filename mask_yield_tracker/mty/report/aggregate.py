@@ -157,6 +157,7 @@ def aggregate(batch: dict, table: dict, modes: list[dict]) -> dict:
                 if st in mode_ids:
                     t.modes[st] += 1
         die_rows.append({"die": die_key(col, row), "col": col, "row": row, "dose": dose, "focus": focus,
+                         "note": batch.get("die_notes", {}).get(die_key(col, row), ""),
                          **t_die.row(mode_ids, pass_ids, resist_ids)})
 
     def cond_sort(c):

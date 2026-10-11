@@ -137,7 +137,7 @@ class App:
 
     def update_batch(self, bid: str, body: dict) -> dict:
         b = self.ws.load_batch(bid)
-        for k in ("meta", "wafer", "splits", "die_notes"):
+        for k in ("meta", "wafer", "splits", "die_notes", "watchlist"):
             if k in body:
                 b[k] = body[k]
         normalize(b)

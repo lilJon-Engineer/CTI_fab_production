@@ -158,3 +158,11 @@ def test_report_endpoint_and_html_import(server, synthetic_gds):
     s, imp = req(server, "POST", "/api/batches/import", html, raw=True)
     assert s == 201 and imp["results"] == {"4,4": {"XA01#1": imp["results"]["4,4"]["XA01#1"]}}
     assert req(server, "POST", "/api/batches/import", b"<html>nope</html>", raw=True)[0] == 400
+
+
+def test_watchlist_saved(server, synthetic_gds):
+    rid = upload_and_extract(server, synthetic_gds)
+    s, b = req(server, "POST", "/api/batches", {"reticle_id": rid, "meta": {"lot": "L"}})
+    s, d = req(server, "PUT", f"/api/batches/{b['id']}", {"watchlist": ["XA01#1", "XR01#1", "XA01#1"]})
+    assert s == 200 and d["watchlist"] == ["XA01#1", "XR01#1"]
+    assert req(server, "GET", f"/api/batches/{b['id']}")[1]["watchlist"] == ["XA01#1", "XR01#1"]
