@@ -88,7 +88,7 @@ def test_full_flow(server, synthetic_gds):
     # export -> import gives a new id when the original still exists
     s, doc = req(server, "GET", f"/api/batches/{bid}/export")
     assert s == 200 and doc["schema"] == "mty.batch" and doc["version"] == 1
-    s, imp = req(server, "POST", "/api/batches/import", doc)
+    s, imp = req(server, "POST", "/api/batches/import", json.dumps(doc).encode(), raw=True)
     assert s == 201 and imp["id"] != bid and imp["results"] == doc["results"]
     s, lst = req(server, "GET", "/api/batches")
     assert {b["id"] for b in lst} == {bid, imp["id"]}
@@ -145,3 +145,16 @@ def test_new_batch_matches_schema(table):
     assert set(schema["required"]) <= set(b)
     assert set(b) <= set(schema["properties"])
     assert set(schema["properties"]["wafer"]["required"]) <= set(b["wafer"])
+
+
+def test_report_endpoint_and_html_import(server, synthetic_gds):
+    rid = upload_and_extract(server, synthetic_gds)
+    wafer = default_wafer()
+    wafer["dies"] = [[4, 4]]
+    s, b = req(server, "POST", "/api/batches", {"reticle_id": rid, "meta": {"lot": "L"}, "wafer": wafer})
+    req(server, "POST", f"/api/batches/{b['id']}/results", {"die": [4, 4], "updates": [{"device_id": "XA01#1", "status": "pass"}]})
+    s, html = req(server, "GET", f"/api/batches/{b['id']}/report")
+    assert s == 200 and b"Yield report" in html
+    s, imp = req(server, "POST", "/api/batches/import", html, raw=True)
+    assert s == 201 and imp["results"] == {"4,4": {"XA01#1": imp["results"]["4,4"]["XA01#1"]}}
+    assert req(server, "POST", "/api/batches/import", b"<html>nope</html>", raw=True)[0] == 400

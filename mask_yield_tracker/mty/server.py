@@ -25,6 +25,7 @@ from .config import ConfigError, config_from_dict
 from .extract import extract, summary, write_outputs
 from .extract.listing import describe
 from .extract.suggest import suggest_config, to_toml
+from .report import build_report, extract_report_data
 from .workspace import Workspace, WorkspaceError, new_id, now, read_json
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
@@ -160,16 +161,32 @@ class App:
         self.ws.save_batch(b)
         return {"modified": b["modified"], "die": f"{col},{row}", "results": b["results"].get(f"{col},{row}", {})}
 
-    def import_batch(self, doc: dict) -> dict:
+    def import_batch(self, raw: bytes) -> dict:
+        """Accepts a batch JSON file or a report .html (its embedded batch)."""
+        text = raw.decode("utf-8-sig")
+        try:
+            doc = json.loads(text) if text.lstrip().startswith("{") else extract_report_data(text)["batch"]
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ApiError(400, f"not a batch or report file: {e}") from e
         b = migrate(doc)
         rid = b.get("reticle", {}).get("id")
         try:
             self.ws.reticle_dir(rid)
         except WorkspaceError:
-            raise ApiError(400, f"batch refers to reticle {rid!r}, which is not in this workspace") from None
+            # same layout uploaded under another id? re-link by file hash
+            sha = b.get("reticle", {}).get("gate_sha256")
+            match = [r for r in self.ws.list_reticles() if (r.get("extracted") or {}).get("gate_sha256") == sha]
+            if not match:
+                raise ApiError(400, f"batch refers to reticle {rid!r}, which is not in this workspace; "
+                                    "upload and extract the same layout first") from None
+            b["reticle"]["id"] = match[0]["id"]
         if self.ws.batch_path(b["id"]).exists():
             b["id"] = new_id(b["id"].rsplit("-", 3)[0] + "-import")
         return self.ws.save_batch(b)
+
+    def report_html(self, bid: str) -> str:
+        b = self.ws.load_batch(bid)
+        return build_report(b, self.table(b["reticle"]["id"]), load_failure_modes())
 
     def delete_batch(self, bid: str) -> None:
         p = self.ws.batch_path(bid)
@@ -321,7 +338,10 @@ class Handler(BaseHTTPRequestHandler):
             if len(p) == 1 and m == "POST":
                 return self._json(app.create_batch(self._body_json()), 201)
             if p[1:] == ["import"] and m == "POST":
-                return self._json(app.import_batch(self._body_json()), 201)
+                n = self._length()
+                if n > MAX_JSON:
+                    raise ApiError(413, "file too large")
+                return self._json(app.import_batch(self.rfile.read(n)), 201)
             bid = p[1]
             rest = p[2:]
             if not rest and m == "GET":
@@ -333,6 +353,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"deleted": bid})
             if rest == ["results"] and m == "POST":
                 return self._json(app.record(bid, self._body_json()))
+            if rest == ["report"] and m == "GET":
+                extra = {"Content-Disposition": f'attachment; filename="{bid}_report.html"'} if q.get("download") else None
+                return self._send(200, app.report_html(bid).encode("utf-8"), "text/html; charset=utf-8", extra)
             if rest == ["export"] and m == "GET":
                 return self._json(ws.load_batch(bid), extra={
                     "Content-Disposition": f'attachment; filename="{bid}.batch.json"'})

@@ -22,6 +22,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--out", default=str(DEFAULT_OUT), help=f"output folder (default {DEFAULT_OUT})")
     p.add_argument("--stem", default="device_table", help="output file name stem")
 
+    p = sub.add_parser("report", help="write the HTML + CSV report for one batch")
+    p.add_argument("batch", help="batch .json (export from the app) or a report .html")
+    p.add_argument("-d", "--devices", required=True, help="device_table.json of the batch's reticle")
+    p.add_argument("-o", "--out", default=str(DEFAULT_OUT.parent / "reports"))
+
     p = sub.add_parser("serve", help="run the local inspection app (http://127.0.0.1:PORT)")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--workspace", default=None, help="data folder (default local/workspace)")
@@ -43,6 +48,16 @@ def main(argv: list[str] | None = None) -> int:
         jp, cp = write_outputs(table, a.out, a.stem, geometry)
         print(summary(table))
         print(f"\nWrote {jp}\n      {cp}")
+    elif a.cmd == "report":
+        import json
+        from .batch import load_failure_modes, migrate
+        from .report import extract_report_data, write_report
+        text = Path(a.batch).read_text(encoding="utf-8-sig")
+        batch = migrate(json.loads(text) if text.lstrip().startswith("{") else extract_report_data(text)["batch"])
+        table = json.loads(Path(a.devices).read_text(encoding="utf-8"))
+        if table["source"]["gate_sha256"] != batch["reticle"]["gate_sha256"]:
+            print("warning: device table comes from a different reticle file than the batch")
+        print(f"Wrote {write_report(batch, table, load_failure_modes(), a.out)} (+ CSVs)")
     elif a.cmd == "serve":
         from .server import DEFAULT_DEFAULTS, DEFAULT_WORKSPACE, serve
         serve(a.workspace or DEFAULT_WORKSPACE, a.port, not a.no_browser, a.defaults or DEFAULT_DEFAULTS)

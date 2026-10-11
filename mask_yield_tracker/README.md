@@ -3,8 +3,8 @@
 Track photolithography yield by gate CD across dose (and later focus) splits,
 from optical inspection of every device on the reticle.
 
-Status: **step 1 (reticle extractor)** and **step 2 (local inspection app and
-batch files)** are in place. The batch report comes next (see Roadmap).
+Status: steps 1–3 are in place: **reticle extractor**, **local inspection app
+with batch files**, and the **batch yield report**.
 
 ## Data privacy
 
@@ -70,6 +70,36 @@ uploaded reticles, configs, device tables, drawn geometry and batch files.
 *Rotate* and *Mirror* change only the field view, to match what you see under
 the microscope. Batches can be exported to and imported from JSON
 (`schemas/batch.v1.schema.json`).
+
+## Batch report
+
+*Batches → Report* (or *report* in the Inspect view) opens the report for one
+batch; *download report* saves it as a single offline `.html` file:
+
+- summary tiles (dies, results recorded, coverage, overall yield) and batch metadata
+- yield vs dose for all devices, and outcome mix (pass / failure modes) per dose
+- yield vs dose per CD as small multiples on a common 0–100 % scale
+- CD × dose heatmap (yield %, devices inspected), and CD + pitch × dose
+- outcome mix per CD
+- per-die wafer map and table (dose, focus, coverage, yield, 95 % interval, counts per mode)
+
+Yield = pass / inspected; sites without a result are left out and reported as
+coverage. CDs are finger widths; sites without fingers are grouped by their
+thinnest drawn width ("thinnest 350 nm"). When focus varies, each chart shows
+one line per focus value and the heatmap columns are dose / focus.
+
+*Print / save as PDF* prints a clean PDF; the CSV buttons export yield by CD ×
+dose, by CD + pitch × dose, per die, and every recorded result. The report
+embeds the batch, so *Batches → Import batch…* accepts a report `.html` to
+reopen it (the reticle must be in the workspace; it is re-linked by file hash
+if its id differs).
+
+From the command line (export the batch first):
+
+```powershell
+python -m mty report local\batch.json -d local\workspace\reticles\<id>\device_table.json
+```
+writes the HTML and the CSVs to `local/reports/`.
 
 ## Extracting the device table from the command line
 
@@ -143,6 +173,8 @@ mty/server.py                     local web server + JSON API (stdlib only)
 mty/workspace.py                  on-disk workspace (reticles, batches)
 mty/batch.py                      batch schema: create, normalize, migrate, record results
 mty/extract/suggest.py            config suggestion for an uploaded layout
+mty/report/aggregate.py           yield / failure-mode aggregation, Wilson intervals
+mty/report/html.py                single-file HTML report (inline SVG) with embedded data
 app/                              browser UI (plain JS, works offline)
 mty/config.py                     config loading + validation
 mty/extract/sites.py              hierarchy walk, groups, splitting, text exclusion
@@ -159,5 +191,6 @@ local/                            your data (gitignored)
 1. ~~Reticle extractor~~
 2. ~~Local app: reticle upload/extract, wafer grid, wafer map, die view, CD
    lookup, click-to-record, batch files with import/export~~
-3. Report: yield vs dose per CD, failure-mode breakdown, per-die summary;
-   HTML (printable to PDF) with the data embedded so the app can reopen it, plus CSV.
+3. ~~Batch report: HTML/PDF/CSV, re-openable~~
+4. Next ideas: per-process-step projects, comparing batches, focus-exposure
+   matrix views once focus splits are used.

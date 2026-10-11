@@ -4,11 +4,11 @@ export async function renderBatches(root, [mode, id]) {
   if (mode === "new" || mode === "edit") return renderEditor(root, mode === "edit" ? id : null);
   const [list, reticles] = await Promise.all([api.batches(), api.reticles()]);
 
-  const importInput = h("input", { type: "file", accept: ".json", style: { display: "none" } });
+  const importInput = h("input", { type: "file", accept: ".json,.html", style: { display: "none" } });
   importInput.onchange = guard(async () => {
     const f = importInput.files[0];
     if (!f) return;
-    const b = await api.importBatch(JSON.parse(await f.text()));
+    const b = await api.importBatch(await f.text());
     toast(`Imported ${b.id}`);
     root.replaceChildren();
     renderBatches(root, []);
@@ -18,7 +18,7 @@ export async function renderBatches(root, [mode, id]) {
   root.append(h("div", { class: "card" },
     h("div", { class: "row" },
       h("h2", { class: "grow" }, "Batches"),
-      h("button", { class: "btn", onclick: () => importInput.click() }, "Import batch…"), importInput,
+      h("button", { class: "btn", onclick: () => importInput.click(), title: "a batch .json or a report .html" }, "Import batch…"), importInput,
       h("button", {
         class: "btn primary", disabled: !extracted.length,
         title: extracted.length ? "" : "Upload and extract a reticle first",
@@ -33,6 +33,7 @@ export async function renderBatches(root, [mode, id]) {
         h("td", {}, b.n_results), h("td", { class: "small muted" }, (b.modified || "").slice(0, 16).replace("T", " ")),
         h("td", { style: { whiteSpace: "nowrap" } },
           h("button", { class: "btn primary", onclick: () => (location.hash = `#/inspect/${encodeURIComponent(b.id)}`) }, "Inspect"), " ",
+          h("a", { class: "btn", href: `/api/batches/${encodeURIComponent(b.id)}/report`, target: "_blank", rel: "noopener" }, "Report"), " ",
           h("button", { class: "btn", onclick: () => (location.hash = `#/batches/edit/${encodeURIComponent(b.id)}`) }, "Edit"), " ",
           h("button", { class: "btn", onclick: guard(async () => download(`${b.id}.batch.json`, JSON.stringify(await api.batch(b.id), null, 1))) }, "Export"), " ",
           h("button", {

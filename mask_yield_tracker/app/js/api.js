@@ -27,7 +27,7 @@ export const api = {
   createBatch: (body) => call("POST", "/api/batches", body),
   updateBatch: (id, body) => call("PUT", `/api/batches/${encodeURIComponent(id)}`, body),
   deleteBatch: (id) => call("DELETE", `/api/batches/${encodeURIComponent(id)}`),
-  importBatch: (doc) => call("POST", "/api/batches/import", doc),
+  importBatch: (text) => call("POST", "/api/batches/import", text, true),
   record: (id, die, updates) => call("POST", `/api/batches/${encodeURIComponent(id)}/results`, { die, updates }),
   diesOnWafer: (wafer, fw, fh) => call("POST", "/api/wafer/dies", { wafer, field_w_mm: fw, field_h_mm: fh }),
 };
