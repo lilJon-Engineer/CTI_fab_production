@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mty.batch.v1",
+  "title": "Batch: one wafer inspected at one process step",
+  "type": "object",
+  "required": ["schema", "version", "id", "reticle", "meta", "wafer", "splits", "results"],
+  "properties": {
+    "schema": {"const": "mty.batch"},
+    "version": {"const": 1},
+    "id": {"type": "string", "pattern": "^[A-Za-z0-9_.-]{1,80}$"},
+    "created": {"type": "string"},
+    "modified": {"type": "string"},
+    "reticle": {
+      "type": "object",
+      "required": ["id", "gate_sha256"],
+      "properties": {
+        "id": {"type": "string"}, "name": {"type": ["string", "null"]},
+        "gate_sha256": {"type": "string"}, "device_table_created": {"type": ["string", "null"]},
+        "n_devices": {"type": "integer"}
+      }
+    },
+    "meta": {"type": "object", "description": "Fields from config/batch_meta.json; any extra keys are kept",
+             "additionalProperties": {"type": ["string", "number", "null"]}},
+    "wafer": {
+      "type": "object",
+      "required": ["diameter_mm", "step_x_mm", "step_y_mm", "n_cols", "n_rows", "dies"],
+      "properties": {
+        "diameter_mm": {"type": "number"}, "edge_exclusion_mm": {"type": "number"},
+        "step_x_mm": {"type": "number"}, "step_y_mm": {"type": "number"},
+        "n_cols": {"type": "integer", "minimum": 1}, "n_rows": {"type": "integer", "minimum": 1},
+        "offset_x_mm": {"type": "number"}, "offset_y_mm": {"type": "number"},
+        "dies": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
+                 "description": "[col, row] of every inspected die; (0, 0) is the top-left grid position"}
+      }
+    },
+    "splits": {
+      "type": "object",
+      "properties": {
+        "dose_unit": {"type": "string"}, "focus_unit": {"type": "string"},
+        "columns": {"type": "array", "items": {"type": "object", "properties": {"dose": {"type": ["number", "null"]}, "focus": {"type": ["number", "null"]}}}},
+        "rows": {"type": "array", "items": {"type": "object", "properties": {"focus": {"type": ["number", "null"]}}},
+                 "description": "A row focus value overrides the column focus for that die"}
+      }
+    },
+    "results": {
+      "type": "object",
+      "description": "{\"col,row\": {device_id: {status, ts}}}; status is an id from config/failure_modes.json",
+      "additionalProperties": {"type": "object", "additionalProperties": {
+        "type": "object", "required": ["status"],
+        "properties": {"status": {"type": "string"}, "ts": {"type": "string"}}}}
+    },
+    "die_notes": {"type": "object", "additionalProperties": {"type": "string"}}
+  }
+}

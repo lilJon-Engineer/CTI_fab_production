@@ -22,6 +22,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-o", "--out", default=str(DEFAULT_OUT), help=f"output folder (default {DEFAULT_OUT})")
     p.add_argument("--stem", default="device_table", help="output file name stem")
 
+    p = sub.add_parser("serve", help="run the local inspection app (http://127.0.0.1:PORT)")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--workspace", default=None, help="data folder (default local/workspace)")
+    p.add_argument("--defaults", default=None, help="TOML with default config sections (default local/defaults.toml)")
+    p.add_argument("--no-browser", action="store_true")
+
     p = sub.add_parser("synthetic", help="write the synthetic test reticle")
     p.add_argument("out", nargs="?", default=str(DEFAULT_OUT.parent / "synthetic.gds"))
 
@@ -32,10 +38,14 @@ def main(argv: list[str] | None = None) -> int:
     elif a.cmd == "extract":
         from .config import load_config
         from .extract import extract, summary, write_outputs
-        table = extract(a.reticle, load_config(a.config))
-        jp, cp = write_outputs(table, a.out, a.stem)
+        geometry: dict = {}
+        table = extract(a.reticle, load_config(a.config), geometry)
+        jp, cp = write_outputs(table, a.out, a.stem, geometry)
         print(summary(table))
         print(f"\nWrote {jp}\n      {cp}")
+    elif a.cmd == "serve":
+        from .server import DEFAULT_DEFAULTS, DEFAULT_WORKSPACE, serve
+        serve(a.workspace or DEFAULT_WORKSPACE, a.port, not a.no_browser, a.defaults or DEFAULT_DEFAULTS)
     elif a.cmd == "synthetic":
         from .synthetic import build
         print(f"Wrote {build(a.out)}")

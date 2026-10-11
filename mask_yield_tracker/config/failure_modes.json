@@ -3,9 +3,38 @@
   "version": 1,
   "_comment": "Inspection outcomes used by the app and the report. Add entries to extend; never reuse or rename an id that is already in saved batch files.",
   "modes": [
-    {"id": "pass",     "label": "Pass",     "pass": true,  "color": "#2e9d5b", "key": "p", "description": "Structure present and cleared as intended"},
-    {"id": "lifting",  "label": "Lifting",  "pass": false, "color": "#d9822b", "key": "l", "description": "Un-cleared resist before metallization"},
-    {"id": "missing",  "label": "Missing",  "pass": false, "color": "#c23b3b", "key": "m", "description": "Structure gone"},
-    {"id": "skating",  "label": "Skating",  "pass": false, "color": "#7a5bc7", "key": "s", "description": "Resist ends up as an isolated line instead of an isolated trench for metallization"}
-  ]
+    {
+      "id": "pass",
+      "label": "Pass",
+      "pass": true,
+      "color": "#008300",
+      "key": "p",
+      "description": "Structure present and cleared as intended"
+    },
+    {
+      "id": "lifting",
+      "label": "Lifting",
+      "pass": false,
+      "color": "#eda100",
+      "key": "l",
+      "description": "Un-cleared resist before metallization"
+    },
+    {
+      "id": "missing",
+      "label": "Missing",
+      "pass": false,
+      "color": "#e34948",
+      "key": "m",
+      "description": "Structure gone"
+    },
+    {
+      "id": "skating",
+      "label": "Skating",
+      "pass": false,
+      "color": "#2a78d6",
+      "key": "s",
+      "description": "Resist ends up as an isolated line instead of an isolated trench for metallization"
+    }
+  ],
+  "_colors": "Colors validated as a set (all-pairs, light surface). Every mark also shows its key letter, so status never relies on color alone."
 }

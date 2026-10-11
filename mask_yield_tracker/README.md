@@ -3,8 +3,8 @@
 Track photolithography yield by gate CD across dose (and later focus) splits,
 from optical inspection of every device on the reticle.
 
-Status: **step 1 — reticle extractor** is in place. The inspection app and the
-batch report come next (see Roadmap).
+Status: **step 1 (reticle extractor)** and **step 2 (local inspection app and
+batch files)** are in place. The batch report comes next (see Roadmap).
 
 ## Data privacy
 
@@ -31,7 +31,47 @@ pytest
 
 `klayout` installs from PyPI as a wheel; no KLayout GUI is needed.
 
-## Extracting the device table
+## The inspection app
+
+```powershell
+python -m mty serve            # opens http://127.0.0.1:8765/ in your browser
+```
+
+The server runs on your machine only (bound to 127.0.0.1; requests from other
+sites are refused). All data lives in `local/workspace/` (gitignored):
+uploaded reticles, configs, device tables, drawn geometry and batch files.
+
+1. **Reticles**: upload a .gds/.oas. The app lists layers and cells and writes a
+   suggested config (top cells, layer, suffixes, groups). Edit it, then
+   *Save & extract*. Optional: put default `[text]` / `[split]` sections in
+   `local/defaults.toml` so every new reticle starts with your patterns.
+2. **Batches → New batch**: pick the reticle; fill in lot, wafer, process step,
+   date, operator, notes (fields come from `config/batch_meta.json`, so add your
+   own there); set the wafer grid (diameter, edge exclusion, die step, columns,
+   rows) and click dies to include them (*Select dies inside wafer* uses the
+   reticle field size); enter the dose per column (linear fill helper) and focus
+   per column or row when it varies.
+3. **Inspect**: the wafer map shows each die coloured by yield of the devices
+   in view. Click a die; the field shows every site at its true position. Wheel
+   zooms, drag pans, double-click zooms to a device; when a device is large
+   enough its real gate geometry is drawn.
+   *CD lookup* highlights every device with that finger CD (or thinnest width
+   for lines); small highlighted devices get a locator ring. Click a device and
+   press a key to record the result. Every click is saved immediately.
+
+| key | action |
+|---|---|
+| P / L / M / S | pass / lifting / missing / skating (keys come from `config/failure_modes.json`) |
+| U, Backspace | clear the result |
+| N / B | next / previous highlighted device |
+| ] / [ | next / previous die (the selected device stays selected) |
+| F / Z / Esc | fit field / zoom to device / deselect |
+
+*Rotate* and *Mirror* change only the field view, to match what you see under
+the microscope. Batches can be exported to and imported from JSON
+(`schemas/batch.v1.schema.json`).
+
+## Extracting the device table from the command line
 
 1. See what is in the file:
    ```powershell
@@ -45,7 +85,8 @@ pytest
    ```powershell
    python -m mty extract local\my_reticle.gds -c local\my_reticle.local.toml
    ```
-   Writes `local/extracted/device_table.json` and `.csv` and prints a summary
+   Writes `local/extracted/device_table.json`, `.csv` and `geometry.json` (drawn
+   outlines for the app) and prints a summary
    (sites per group/kind, sites per CD, thinnest dimension for the rest, flags).
 
 Try it on the synthetic reticle: `python -m mty synthetic` then
@@ -95,7 +136,14 @@ Try it on the synthetic reticle: `python -m mty synthetic` then
 ```
 config/reticle.example.toml       config template (synthetic values)
 config/failure_modes.json         pass / lifting / missing / skating (extend here)
+config/batch_meta.json            batch metadata fields (extend here)
 schemas/device_table.v1.schema.json
+schemas/batch.v1.schema.json
+mty/server.py                     local web server + JSON API (stdlib only)
+mty/workspace.py                  on-disk workspace (reticles, batches)
+mty/batch.py                      batch schema: create, normalize, migrate, record results
+mty/extract/suggest.py            config suggestion for an uploaded layout
+app/                              browser UI (plain JS, works offline)
 mty/config.py                     config loading + validation
 mty/extract/sites.py              hierarchy walk, groups, splitting, text exclusion
 mty/extract/geometry.py           CD / fingers / pitch / thinnest dimension
@@ -108,12 +156,8 @@ local/                            your data (gitignored)
 
 ## Roadmap
 
-1. ~~Reticle extractor~~ (this step)
-2. Local app (`python -m mty serve`, browser UI on 127.0.0.1, offline): upload a
-   reticle + config and extract from the UI; define wafer grid (die step,
-   columns/rows, dies to inspect); wafer map → die zoom with every site at its
-   true position; CD lookup highlighting; click-to-record pass/failure mode.
-3. Batch file schema (lot, wafer, process step, per-column dose, per-row/column
-   focus, operator, notes, extensible metadata) with save/load.
-4. Report: yield vs dose per CD, failure-mode breakdown, per-die summary;
+1. ~~Reticle extractor~~
+2. ~~Local app: reticle upload/extract, wafer grid, wafer map, die view, CD
+   lookup, click-to-record, batch files with import/export~~
+3. Report: yield vs dose per CD, failure-mode breakdown, per-die summary;
    HTML (printable to PDF) with the data embedded so the app can reopen it, plus CSV.

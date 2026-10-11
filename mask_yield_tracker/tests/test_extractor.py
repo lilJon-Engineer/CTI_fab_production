@@ -115,3 +115,19 @@ def test_rows_match_schema(table):
         assert set(d) == set(dev["properties"]), set(d) ^ set(dev["properties"])
         if d["kind"] is not None:
             assert d["kind"] in dev["properties"]["kind"]["enum"]
+
+
+def test_geometry_outlines(synthetic_gds, config, table, tmp_path):
+    from mty.extract import extract
+    geo: dict = {}
+    t2 = extract(synthetic_gds, config, geo)
+    assert set(geo) == {d["id"] for d in t2["devices"]}
+    d = next(d for d in t2["devices"] if d["id"] == "XA01#1")
+    polys = geo["XA01#1"]
+    assert len(polys) == 8 + 2          # 8 fingers, bus, pad stub (serifs and text excluded)
+    xs = [v for p in polys for v in p[0::2]]
+    ys = [v for p in polys for v in p[1::2]]
+    x0, y0, x1, y1 = d["bbox_um"]
+    assert min(xs) >= x0 - 1e-6 and max(xs) <= x1 + 1e-6 and min(ys) >= y0 - 1e-6 and max(ys) <= y1 + 1e-6
+    write_outputs(t2, tmp_path, geometry=geo)
+    assert json.loads((tmp_path / "geometry.json").read_text())["outlines_um"]["XA01#1"] == polys

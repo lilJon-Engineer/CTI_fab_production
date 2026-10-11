@@ -24,6 +24,11 @@ class Prim:
     orient: str | None          # "h" | "v" | None (diagonal / non-manhattan / bent)
     center: tuple[float, float]
     bbox: db.Box
+    outline: list[tuple[int, int]] | None = None   # drawn outline (dbu, field frame), for display
+
+
+def _outline(poly: db.Polygon) -> list[tuple[int, int]]:
+    return [(p.x, p.y) for p in poly.each_point_hull()]
 
 
 @dataclass
@@ -54,13 +59,14 @@ def _from_path(p: db.Path) -> Prim:
     straight = len(pts) == 2
     o = _orient(pts[-1].x - pts[0].x, pts[-1].y - pts[0].y) if straight else None
     bb = p.bbox()
-    return Prim(p.width, length, straight, o, (bb.center().x, bb.center().y), bb)
+    return Prim(p.width, length, straight, o, (bb.center().x, bb.center().y), bb, _outline(p.polygon()))
 
 
 def _from_box(b: db.Box) -> Prim:
     w, h = b.width(), b.height()
     o = "h" if w > h else "v" if h > w else None
-    return Prim(min(w, h), max(w, h), True, o, (b.center().x, b.center().y), b)
+    pts = [(b.left, b.bottom), (b.right, b.bottom), (b.right, b.top), (b.left, b.top)]
+    return Prim(min(w, h), max(w, h), True, o, (b.center().x, b.center().y), b, pts)
 
 
 def min_width(poly: db.Polygon) -> int:
@@ -86,7 +92,7 @@ def _from_polygon(poly: db.Polygon) -> Prim:
     bb = poly.bbox()
     w = min_width(poly)
     # line-equivalent length: area / width
-    return Prim(w, poly.area() / max(w, 1), False, None, (bb.center().x, bb.center().y), bb)
+    return Prim(w, poly.area() / max(w, 1), False, None, (bb.center().x, bb.center().y), bb, _outline(poly))
 
 
 def shape_to_prim(shape: db.Shape, trans: db.ICplxTrans, ignore_triangles: bool) -> Prim | None:

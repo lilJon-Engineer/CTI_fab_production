@@ -73,7 +73,9 @@ def _pair(name: str, gate_box: db.Box, sd_sites: list[tuple[RawSite, db.Box]], m
     return (best[1], best[2], "overlap") if best else (None, 0.0, None)
 
 
-def extract(reticle: str | Path, cfg: Config) -> dict:
+def extract(reticle: str | Path, cfg: Config, geometry: dict | None = None) -> dict:
+    """Build the device table. If `geometry` is a dict it is filled with
+    {device_id: [[x0, y0, x1, y1, ...] per polygon, in um]} for display."""
     reticle = Path(reticle)
     cache: dict = {}
     gate_path = Path(cfg.gate.file) if cfg.gate.file else reticle
@@ -109,7 +111,9 @@ def extract(reticle: str | Path, cfg: Config) -> dict:
                 elif how == "overlap":
                     flags.append("sd_name_differs_from_gate")
         b = g.bbox
+        outlines = [[round(v * um, 4) for pt in p.outline for v in pt] for p in s.prims if p.outline]
         devices.append({
+            "_outlines": outlines,
             "name": name,
             "group": s.group,
             "gate_cell": s.cell,
@@ -142,6 +146,10 @@ def extract(reticle: str | Path, cfg: Config) -> dict:
             d["placements_total"] = len(ds)
             d["id"] = f"{name}#{i}"
     devices.sort(key=lambda d: (d["group"], d["name"], d["placement"]))
+    for d in devices:
+        outlines = d.pop("_outlines")
+        if geometry is not None:
+            geometry[d["id"]] = outlines
     devices = [{"id": d.pop("id"), **d} for d in devices]
 
     top = gate_ly.cell(cfg.gate.top_cell)
@@ -170,9 +178,14 @@ CSV_COLUMNS = ["id", "name", "group", "kind", "cd_nm", "n_fingers", "pitch_nm", 
                "gate_cell", "parent_cell", "sd_name", "sd_cell", "sd_match", "sd_coverage", "widths_nm", "flags"]
 
 
-def write_outputs(table: dict, out_dir: str | Path, stem: str = "device_table") -> tuple[Path, Path]:
+def write_outputs(table: dict, out_dir: str | Path, stem: str = "device_table",
+                  geometry: dict | None = None) -> tuple[Path, Path]:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    if geometry is not None:
+        (out / "geometry.json").write_text(json.dumps({"schema": "mty.geometry", "version": 1,
+                                                       "device_table_created": table["created"],
+                                                       "outlines_um": geometry}), encoding="utf-8")
     jp, cp = out / f"{stem}.json", out / f"{stem}.csv"
     jp.write_text(json.dumps(table, indent=1), encoding="utf-8")
     with open(cp, "w", newline="", encoding="utf-8") as f:

@@ -1,0 +1,15 @@
+{
+  "schema": "mty.batch_meta_fields",
+  "version": 1,
+  "_comment": "Metadata fields shown on a batch. Add entries to extend; existing batches keep any values they already have. type: text | date | textarea | number | select (with options).",
+  "fields": [
+    {"id": "lot",          "label": "Lot",          "type": "text",     "required": true},
+    {"id": "wafer",        "label": "Wafer",        "type": "text",     "required": true},
+    {"id": "process_step", "label": "Process step", "type": "text",     "required": true},
+    {"id": "date",         "label": "Date",         "type": "date",     "required": true},
+    {"id": "operator",     "label": "Operator",     "type": "text"},
+    {"id": "resist",       "label": "Resist",       "type": "text"},
+    {"id": "tool",         "label": "Exposure tool","type": "text"},
+    {"id": "notes",        "label": "Notes",        "type": "textarea"}
+  ]
+}

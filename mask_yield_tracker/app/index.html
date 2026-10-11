@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mask Yield Tracker</title>
+<link rel="stylesheet" href="/app/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Mask Yield Tracker</div>
+  <nav>
+    <a href="#/reticles" data-view="reticles">Reticles</a>
+    <a href="#/batches" data-view="batches">Batches</a>
+    <a href="#/inspect" data-view="inspect" id="nav-inspect">Inspect</a>
+  </nav>
+  <div class="status" id="save-status" aria-live="polite"></div>
+</header>
+<main id="view"></main>
+<div id="toast" role="status" aria-live="polite"></div>
+<script type="module" src="/app/js/main.js"></script>
+</body>
+</html>
