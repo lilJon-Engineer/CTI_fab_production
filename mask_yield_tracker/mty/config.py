@@ -40,6 +40,14 @@ class Geometry:
 
 
 @dataclass
+class ResistConfig:
+    enabled: bool = True
+    drawn: str = "opening"        # "opening": drawn shapes are cleared (lift-off); "resist": drawn shapes are resist
+    thin_um: float = 2.0          # resist narrower than this is tracked as a thin feature
+    min_area_um2: float = 0.05    # ignore slivers smaller than this
+
+
+@dataclass
 class Config:
     gate: ReticleSide
     sd: ReticleSide | None
@@ -49,6 +57,7 @@ class Config:
     own_shapes_site: bool = True
     geometry: Geometry = field(default_factory=Geometry)
     min_coverage: float = 0.5
+    resist: ResistConfig = field(default_factory=ResistConfig)
     raw: dict = field(default_factory=dict)
 
     def is_text(self, cell_name: str) -> bool:
@@ -95,6 +104,9 @@ def config_from_dict(raw: dict) -> Config:
     if not groups:
         raise ConfigError("config needs at least one [[groups]] entry")
     geo = Geometry(**raw.get("geometry", {}))
+    resist = ResistConfig(**raw.get("resist", {}))
+    if resist.drawn not in ("opening", "resist"):
+        raise ConfigError('[resist] drawn must be "opening" or "resist"')
     split = raw.get("split", {})
     return Config(
         gate=gate,
@@ -105,5 +117,6 @@ def config_from_dict(raw: dict) -> Config:
         own_shapes_site=bool(split.get("own_shapes_site", True)),
         geometry=geo,
         min_coverage=float(raw.get("pairing", {}).get("min_coverage", 0.5)),
+        resist=resist,
         raw=raw,
     )

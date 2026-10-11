@@ -35,7 +35,7 @@ def test_aggregate_counts(batch, table):
     assert cell[("cd:250", 14)]["yield"] is None and cell[("cd:250", 14)]["inspected"] == 0
     assert cell[("cd:150", 10)]["modes"]["skating"] == 1
     t = agg["total"]
-    assert t["sites"] == 12 * 3 and t["inspected"] == 7 and t["pass"] == 4
+    assert t["sites"] == 13 * 3 and t["inspected"] == 7 and t["pass"] == 4
     assert [d["inspected"] for d in agg["dies"]] == [4, 3, 0]
     assert not agg["focus_varies"]
     assert [c["dose"] for c in agg["conditions"]] == [10, 12, 14]
@@ -82,3 +82,34 @@ def test_report_escapes_script_end(batch, table):
 def test_not_a_report():
     with pytest.raises(ValueError):
         extract_report_data("<html></html>")
+
+
+def test_resist_aggregation(table):
+    from mty.batch import new_batch
+    w = {"diameter_mm": 100, "step_x_mm": 10, "step_y_mm": 10, "n_cols": 2, "n_rows": 1, "dies": [[0, 0], [1, 0]]}
+    b = new_batch({"id": "r1"}, table, {"lot": "L"}, w, {"columns": [{"dose": 10}, {"dose": 20}]})
+    ids = {d["id"] for d in table["devices"]}
+    st = {m["id"] for m in load_failure_modes()}
+    set_result(b, 0, 0, "XR01#1", "skating", st, ids)        # 800 nm resist, has an island
+    set_result(b, 0, 0, "BARS#1", "pass", st, ids)           # 500 nm resist, held at both ends
+    set_result(b, 0, 0, "XA01#1", "pass", st, ids)           # no thin resist
+    set_result(b, 1, 0, "XR01#1", "pass", st, ids)
+    agg = aggregate(b, table, load_failure_modes())
+    assert agg["resist_mode_ids"] == ["skating"]
+    width = {(r["key"], r["dose"]): r for r in agg["resist"]["width"]["cond"]}
+    assert width[("rw:800", 10)]["resist_fail_rate"] == 1.0
+    assert width[("rw:800", 20)]["resist_fail_rate"] == 0.0
+    assert width[("rw:500", 10)]["resist_fail"] == 0 and width[("none", 10)]["inspected"] == 1
+    anchor = {r["key"]: r for r in agg["resist"]["anchor"]["bins"]}
+    assert anchor["island"]["resist_fail"] == 1 and anchor["both_ends"]["inspected"] == 1
+    area = {r["key"]: r for r in agg["resist"]["area"]["bins"]}
+    assert area["ra:0"]["inspected"] == 2                       # XR01 smallest area 5 um2 (< 10)
+    html = build_report(b, table, load_failure_modes())
+    assert "Thin resist and skating" in html and "has an island" in html
+
+
+def test_csv_columns_unique(batch, table, tmp_path):
+    write_report(batch, table, load_failure_modes(), tmp_path)
+    for f in tmp_path.glob("*.csv"):
+        header = f.read_text().splitlines()[0].split(",")
+        assert len(header) == len(set(header)), f.name

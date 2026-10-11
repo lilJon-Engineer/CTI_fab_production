@@ -46,6 +46,43 @@ def _cd_sort(key: str):
     return (kind, v)
 
 
+AREA_BINS = [(10, "< 10 µm²"), (100, "10–100 µm²"), (1000, "100–1000 µm²"), (float("inf"), "≥ 1000 µm²")]
+ANCHOR_ORDER = ["island", "one_end", "both_ends", "none"]
+ANCHOR_LABEL = {"island": "has an island", "one_end": "held at one end", "both_ends": "held at both ends",
+                "none": "no thin resist"}
+
+
+def resist_width_key(d: dict) -> str:
+    w = d.get("resist_min_width_nm")
+    return "none" if w is None else f"rw:{round(w, -1):g}"
+
+
+def resist_width_label(key: str) -> str:
+    return "no thin resist" if key == "none" else f"{key[3:]} nm"
+
+
+def resist_area_key(d: dict) -> str:
+    a = d.get("resist_min_area_um2")
+    if a is None:
+        return "none"
+    for i, (hi, _) in enumerate(AREA_BINS):
+        if a < hi:
+            return f"ra:{i}"
+    return f"ra:{len(AREA_BINS) - 1}"
+
+
+def resist_area_label(key: str) -> str:
+    return "no thin resist" if key == "none" else AREA_BINS[int(key[3:])][1]
+
+
+def resist_anchor_key(d: dict) -> str:
+    a = d.get("resist_anchoring") or {}
+    for k in ("island", "one_end", "both_ends"):
+        if a.get(k):
+            return k
+    return "none"
+
+
 def wilson(passed: int, n: int, z: float = 1.96) -> tuple[float | None, float | None]:
     """95 % Wilson score interval for a pass fraction."""
     if n == 0:
@@ -64,11 +101,13 @@ class Tally:
         self.sites = 0
         self.modes: dict[str, int] = defaultdict(int)
 
-    def row(self, mode_ids: list[str], pass_ids: set[str]) -> dict:
+    def row(self, mode_ids: list[str], pass_ids: set[str], resist_ids: set[str] = frozenset()) -> dict:
         inspected = sum(self.modes.values())
         passed = sum(v for k, v in self.modes.items() if k in pass_ids)
+        rfail = sum(v for k, v in self.modes.items() if k in resist_ids)
         lo, hi = wilson(passed, inspected)
         return {
+            "resist_fail": rfail, "resist_fail_rate": rfail / inspected if inspected else None,
             "sites": self.sites, "inspected": inspected, "pass": passed,
             "yield": passed / inspected if inspected else None,
             "yield_lo": lo, "yield_hi": hi,
@@ -80,7 +119,12 @@ class Tally:
 def aggregate(batch: dict, table: dict, modes: list[dict]) -> dict:
     mode_ids = [m["id"] for m in modes]
     pass_ids = {m["id"] for m in modes if m.get("pass")}
+    resist_ids = {m["id"] for m in modes if m.get("resist")}
     devices = table["devices"]
+    rkeys = {d["id"]: (resist_width_key(d), resist_area_key(d), resist_anchor_key(d)) for d in devices}
+    by_resist: dict[tuple, Tally] = defaultdict(Tally)       # (dimension, bin, dose, focus)
+    by_resist_all: dict[tuple, Tally] = defaultdict(Tally)   # (dimension, bin)
+    by_cd_rw: dict[tuple, Tally] = defaultdict(Tally)        # (cd, resist width bin)
     dev_key = {d["id"]: cd_key(d)[0] for d in devices}
     dev_pitch = {d["id"]: d.get("pitch_nm") for d in devices}
     known = set(dev_key)
@@ -103,13 +147,17 @@ def aggregate(batch: dict, table: dict, modes: list[dict]) -> dict:
         for d in devices:
             k, p = dev_key[d["id"]], dev_pitch[d["id"]]
             st = res.get(d["id"], {}).get("status")
+            rw, ra, rn = rkeys[d["id"]]
             for t in (by_cd_cond[(k, dose, focus)], by_cdpitch_cond[(k, p, dose, focus)], by_cd[k],
-                      by_cond[cond], total, t_die):
+                      by_cond[cond], total, t_die,
+                      by_resist[("width", rw, dose, focus)], by_resist[("area", ra, dose, focus)],
+                      by_resist[("anchor", rn, dose, focus)], by_resist_all[("width", rw)],
+                      by_resist_all[("area", ra)], by_resist_all[("anchor", rn)], by_cd_rw[(k, rw)]):
                 t.sites += 1
                 if st in mode_ids:
                     t.modes[st] += 1
         die_rows.append({"die": die_key(col, row), "col": col, "row": row, "dose": dose, "focus": focus,
-                         **t_die.row(mode_ids, pass_ids)})
+                         **t_die.row(mode_ids, pass_ids, resist_ids)})
 
     def cond_sort(c):
         return (c[0] is None, c[0] if c[0] is not None else 0, c[1] is None, c[1] if c[1] is not None else 0)
@@ -117,19 +165,43 @@ def aggregate(batch: dict, table: dict, modes: list[dict]) -> dict:
     conds = sorted(by_cond, key=cond_sort)
     cds = sorted(by_cd, key=_cd_sort)
     focus_values = sorted({f for _, f in conds if f is not None})
+    def rw_sort(k):
+        return (k == "none", float(k[3:]) if k != "none" else 0.0)
+
+    def ra_sort(k):
+        return (k == "none", int(k[3:]) if k != "none" else 0)
+
+    order = {"width": rw_sort, "area": ra_sort, "anchor": lambda k: ANCHOR_ORDER.index(k)}
+    label = {"width": resist_width_label, "area": resist_area_label, "anchor": ANCHOR_LABEL.get}
+    resist = {}
+    for dim in ("width", "area", "anchor"):
+        bins = sorted({b for (dm, b) in by_resist_all if dm == dim}, key=order[dim])
+        resist[dim] = {
+            "bins": [{"key": b, "label": label[dim](b), "n_devices": sum(1 for v in rkeys.values()
+                                                                         if v[("width", "area", "anchor").index(dim)] == b),
+                      **by_resist_all[(dim, b)].row(mode_ids, pass_ids, resist_ids)} for b in bins],
+            "cond": [{"key": b, "dose": dz, "focus": fc, **t.row(mode_ids, pass_ids, resist_ids)}
+                     for (_, b, dz, fc), t in sorted(((k, t) for k, t in by_resist.items() if k[0] == dim),
+                                                     key=lambda kv: (order[dim](kv[0][1]), cond_sort(kv[0][2:])))],
+        }
+    resist["cd_width"] = [{"cd": k, "rw": rw, **t.row(mode_ids, pass_ids, resist_ids)}
+                          for (k, rw), t in sorted(by_cd_rw.items(), key=lambda kv: (_cd_sort(kv[0][0]), rw_sort(kv[0][1])))]
+
     return {
         "mode_ids": mode_ids,
-        "conditions": [{"dose": c[0], "focus": c[1], **by_cond[c].row(mode_ids, pass_ids)} for c in conds],
+        "resist_mode_ids": sorted(resist_ids),
+        "resist": resist,
+        "conditions": [{"dose": c[0], "focus": c[1], **by_cond[c].row(mode_ids, pass_ids, resist_ids)} for c in conds],
         "focus_varies": len(focus_values) > 1,
         "cds": [{"key": k, "label": cd_label(k), "short": cd_short(k), "n_devices": sum(1 for v in dev_key.values() if v == k),
-                 **by_cd[k].row(mode_ids, pass_ids)} for k in cds],
-        "cd_cond": [{"key": k, "dose": dz, "focus": fc, **t.row(mode_ids, pass_ids)}
+                 **by_cd[k].row(mode_ids, pass_ids, resist_ids)} for k in cds],
+        "cd_cond": [{"key": k, "dose": dz, "focus": fc, **t.row(mode_ids, pass_ids, resist_ids)}
                     for (k, dz, fc), t in sorted(by_cd_cond.items(), key=lambda kv: (_cd_sort(kv[0][0]), cond_sort(kv[0][1:])))],
         "cdpitch_cond": [{"key": k, "pitch_nm": p, "dose": dz, "focus": fc, **t.row(mode_ids, pass_ids)}
                          for (k, p, dz, fc), t in sorted(by_cdpitch_cond.items(),
                                                          key=lambda kv: (_cd_sort(kv[0][0]), kv[0][1] or 0, cond_sort(kv[0][2:])))],
         "dies": die_rows,
-        "total": total.row(mode_ids, pass_ids),
+        "total": total.row(mode_ids, pass_ids, resist_ids),
         "unknown_results": unknown_results,
     }
 
@@ -146,5 +218,7 @@ def result_rows(batch: dict, table: dict) -> list[dict]:
             out.append({"die": key, "col": col, "row": row, "dose": dose, "focus": focus, "device_id": did,
                         "name": d.get("name"), "group": d.get("group"), "kind": d.get("kind"),
                         "cd_nm": d.get("cd_nm"), "pitch_nm": d.get("pitch_nm"), "thinnest_nm": d.get("thinnest_nm"),
+                        "resist_min_width_nm": d.get("resist_min_width_nm"), "resist_min_area_um2": d.get("resist_min_area_um2"),
+                        "resist_max_length_um": d.get("resist_max_length_um"),
                         "status": r.get("status"), "ts": r.get("ts")})
     return out

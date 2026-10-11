@@ -11,7 +11,7 @@ from mty.synthetic import CUTOFF_DEVICES, EXPECTED_SITES, PCM_SUBDEVICES
 
 def test_schema_header(table):
     assert table["schema"] == "mty.device_table"
-    assert table["version"] == 1
+    assert table["version"] == 2
     assert table["source"]["dbu_um"] == pytest.approx(0.001)
     assert len(table["source"]["gate_sha256"]) == 64
 
@@ -91,7 +91,7 @@ def test_outputs_and_summary(table, tmp_path):
     rows = list(csv.DictReader(cp.open()))
     assert {r["id"] for r in rows} == EXPECTED_SITES
     text = summary(table)
-    assert "12 sites" in text and "no_sd_match" in text
+    assert "13 sites" in text and "no_sd_match" in text
 
 
 def test_listing(synthetic_gds):
@@ -109,7 +109,7 @@ def test_config_validation():
 
 def test_rows_match_schema(table):
     from pathlib import Path
-    schema = json.loads((Path(__file__).parent.parent / "schemas" / "device_table.v1.schema.json").read_text())
+    schema = json.loads((Path(__file__).parent.parent / "schemas" / "device_table.v2.schema.json").read_text())
     dev = schema["$defs"]["device"]
     for d in table["devices"]:
         assert set(d) == set(dev["properties"]), set(d) ^ set(dev["properties"])
@@ -121,9 +121,9 @@ def test_geometry_outlines(synthetic_gds, config, table, tmp_path):
     from mty.extract import extract
     geo: dict = {}
     t2 = extract(synthetic_gds, config, geo)
-    assert set(geo) == {d["id"] for d in t2["devices"]}
+    assert set(geo["outlines"]) == {d["id"] for d in t2["devices"]}
     d = next(d for d in t2["devices"] if d["id"] == "XA01#1")
-    polys = geo["XA01#1"]
+    polys = geo["outlines"]["XA01#1"]
     assert len(polys) == 8 + 2          # 8 fingers, bus, pad stub (serifs and text excluded)
     xs = [v for p in polys for v in p[0::2]]
     ys = [v for p in polys for v in p[1::2]]
@@ -131,3 +131,34 @@ def test_geometry_outlines(synthetic_gds, config, table, tmp_path):
     assert min(xs) >= x0 - 1e-6 and max(xs) <= x1 + 1e-6 and min(ys) >= y0 - 1e-6 and max(ys) <= y1 + 1e-6
     write_outputs(t2, tmp_path, geometry=geo)
     assert json.loads((tmp_path / "geometry.json").read_text())["outlines_um"]["XA01#1"] == polys
+
+
+def test_thin_resist(by_id):
+    d = by_id["XR01#1"]
+    assert d["resist_min_width_nm"] == 800 and d["resist_n_thin"] == 4
+    assert d["resist_anchoring"] == {"island": 0 + 1, "one_end": 3, "both_ends": 0}
+    assert d["resist_max_length_um"] == pytest.approx(80.8, abs=0.5)
+    assert d["resist_min_area_um2"] == pytest.approx(5.0)
+    assert {"thin_resist", "resist_island"} <= set(d["flags"])
+    island = next(f for f in d["resist_features"] if f["anchoring"] == "island")
+    assert island["area_um2"] == pytest.approx(5.0) and island["min_width_nm"] == 1000
+    bars = by_id["BARS#1"]                                  # 0.5 um resist between 5 um bars, held at both ends
+    assert bars["resist_min_width_nm"] == 500 and bars["resist_anchoring"]["both_ends"] == 4
+    for sid in ("XA01#1", "XA03#1", "PCMA_01/SubA#1"):       # 6 um+ resist between fingers is not thin
+        assert by_id[sid]["resist_n_thin"] == 0 and by_id[sid]["resist_min_width_nm"] is None
+
+
+def test_resist_polarity_and_threshold(synthetic_gds, config):
+    import copy
+    from mty.config import config_from_dict
+    from mty.extract import extract
+    raw = copy.deepcopy(config.raw)
+    raw["resist"] = {"thin_um": 0.6}                         # only the 0.5 um lines are thin now
+    t = {d["id"]: d for d in extract(synthetic_gds, config_from_dict(raw))["devices"]}
+    assert t["XR01#1"]["resist_n_thin"] == 0 and t["BARS#1"]["resist_n_thin"] == 4
+    raw["resist"] = {"enabled": False}
+    t = {d["id"]: d for d in extract(synthetic_gds, config_from_dict(raw))["devices"]}
+    assert all(d["resist_n_thin"] == 0 for d in t.values())
+    raw["resist"] = {"drawn": "sideways"}
+    with pytest.raises(Exception):
+        config_from_dict(raw)

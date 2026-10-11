@@ -4,6 +4,7 @@ const SEQ = ["--seq-100", "--seq-200", "--seq-300", "--seq-400", "--seq-500", "-
 const MIN_PX = 5;          // smallest drawn size of a device mark
 const RING_PX = 9;         // locator ring for tiny highlighted devices
 const LS_VIEW = "mty.view";
+const HATCH_COLOR = "#eb6834";   // thin resist overlay (same hue as the report's skating-rate ramp)
 
 function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 function loadView() { try { return JSON.parse(localStorage.getItem(LS_VIEW)) || {}; } catch { return {}; } }
@@ -30,10 +31,11 @@ export async function renderInspect(root, [bid]) {
 
   const view = { rot: 0, mirror: false, advance: true, ...loadView() };
   let outlines = null;            // drawn gate geometry per device (loaded in the background)
+  let resistOutlines = null;      // thin resist features per device
   const GEOM_PX = 28;             // draw real geometry once a device is at least this big on screen
   const S = {
     die: batch.wafer.dies[0],
-    filter: { cd: "", group: "", kind: "", text: "", open: false },
+    filter: { cd: "", resist: "", group: "", kind: "", text: "", open: false },
     selected: null,
     scale: 1, panX: 0, panY: 0,
     hover: null,
@@ -134,13 +136,20 @@ export async function renderInspect(root, [bid]) {
   function applyFilter() {
     const f = S.filter;
     const text = f.text.trim().toLowerCase();
-    filterActive = !!(f.cd || f.group || f.kind || text);
+    filterActive = !!(f.cd || f.resist || f.group || f.kind || text);
     const res = resultsOf();
     matching = devices.filter((d) => {
       if (f.cd) {
         const [kind, val] = f.cd.split(":");
         if (kind === "cd" && d.cd_nm !== Number(val)) return false;
         if (kind === "th" && !(d.cd_nm === null && d.thinnest_nm === Number(val))) return false;
+      }
+      if (f.resist) {
+        const w = d.resist_min_width_nm ?? null, anch = d.resist_anchoring || {};
+        if (f.resist === "any" && !(d.resist_n_thin > 0)) return false;
+        if (f.resist === "island" && !anch.island) return false;
+        if (f.resist.startsWith("lt:") && !(w !== null && w < Number(f.resist.slice(3)))) return false;
+        if (f.resist.startsWith("w:") && !(w !== null && Math.round(w / 10) * 10 === Number(f.resist.slice(2)))) return false;
       }
       if (f.group && d.group !== f.group) return false;
       if (f.kind && d.kind !== f.kind) return false;
@@ -254,6 +263,18 @@ export async function renderInspect(root, [bid]) {
     ctx.fillText(nice >= 1000 ? `${nice / 1000} mm` : `${nice} µm`, 12, H - 24);
   }
 
+  let hatchPattern = null;
+  function hatch(ctx) {
+    if (!hatchPattern) {
+      const p = document.createElement("canvas"); p.width = p.height = 6;
+      const g = p.getContext("2d");
+      g.strokeStyle = HATCH_COLOR; g.lineWidth = 1.2;
+      g.beginPath(); g.moveTo(0, 6); g.lineTo(6, 0); g.moveTo(-1, 1); g.lineTo(1, -1); g.moveTo(5, 7); g.lineTo(7, 5); g.stroke();
+      hatchPattern = ctx.createPattern(p, "repeat");
+    }
+    return hatchPattern;
+  }
+
   function drawGeometry(ctx, d, mode, c, emphasize, [x0, y0, x1, y1]) {
     // status as a light wash + border, real gate polygons in ink, key letter as a corner badge
     if (mode) {
@@ -269,6 +290,22 @@ export async function renderInspect(root, [bid]) {
       ctx.closePath();
     }
     ctx.fill("nonzero");
+    const rs = resistOutlines?.[d.id];
+    if (rs?.length) {
+      // thin resist: hatched, so it reads without relying on colour
+      ctx.save();
+      ctx.beginPath();
+      for (const poly of rs) {
+        for (let i = 0; i < poly.length; i += 2) {
+          const [sx, sy] = toScreen(poly[i], poly[i + 1]);
+          if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+        }
+        ctx.closePath();
+      }
+      ctx.fillStyle = hatch(ctx); ctx.fill("nonzero");
+      ctx.strokeStyle = HATCH_COLOR; ctx.lineWidth = 1; ctx.stroke();
+      ctx.restore();
+    }
     ctx.strokeStyle = emphasize ? c.hi : mode ? mode.color : c.strong;
     ctx.lineWidth = mode || emphasize ? 2 : 1;
     ctx.setLineDash(mode ? [] : [4, 3]);
@@ -314,9 +351,10 @@ export async function renderInspect(root, [bid]) {
     const d = hit(e.clientX - r.left, e.clientY - r.top);
     if (!d) { tip.style.display = "none"; return; }
     const st = statusOf(d.id);
-    tip.replaceChildren(h("b", {}, d.name), d.placements_total > 1 ? ` #${d.placement}` : "", h("br"),
+    tip.replaceChildren(h("span", {}, h("b", {}, d.name), d.placements_total > 1 ? ` #${d.placement}` : "", h("br"),
       d.cd_nm !== null ? `CD ${fmt(d.cd_nm)} nm · ${d.n_fingers} finger${d.n_fingers === 1 ? "" : "s"}` : `${d.kind} · thinnest ${fmt(d.thinnest_nm)} nm`,
-      h("br"), st ? state.modeById[st].label : "not inspected");
+      d.resist_n_thin ? [h("br"), `resist ${fmt(d.resist_min_width_nm)} nm narrowest${d.resist_anchoring?.island ? ", island" : ""}`] : null,
+      h("br"), st ? state.modeById[st].label : "not inspected"));
     tip.style.display = "block";
     tip.style.left = Math.min(e.clientX - r.left + 14, W - 200) + "px";
     tip.style.top = (e.clientY - r.top + 14) + "px";
@@ -419,17 +457,27 @@ export async function renderInspect(root, [bid]) {
     h("option", { value: "" }, "All CDs"),
     h("optgroup", { label: "Finger CD (nm)" }, cds.map((v) => h("option", { value: `cd:${v}` }, `${fmt(v)} nm (${devices.filter((d) => d.cd_nm === v).length})`))),
     thin.length ? h("optgroup", { label: "Lines / other: thinnest (nm)" }, thin.map((v) => h("option", { value: `th:${v}` }, `${fmt(v)} nm thinnest`))) : null);
+  const rws = [...new Set(devices.filter((d) => d.resist_min_width_nm != null).map((d) => Math.round(d.resist_min_width_nm / 10) * 10))].sort((a, b) => a - b);
+  const nThin = devices.filter((d) => d.resist_n_thin > 0).length;
+  const nIsl = devices.filter((d) => d.resist_anchoring?.island).length;
+  const resistSel = h("select", { disabled: !nThin },
+    h("option", { value: "" }, nThin ? "Any resist" : "no thin resist data"),
+    nThin ? h("option", { value: "any" }, `any thin resist (${nThin})`) : null,
+    nIsl ? h("option", { value: "island" }, `resist islands (${nIsl})`) : null,
+    [500, 1000].filter((v) => rws.some((w) => w < v)).map((v) => h("option", { value: `lt:${v}` }, `narrowest resist < ${v} nm`)),
+    rws.length ? h("optgroup", { label: "Narrowest resist (nm)" },
+      rws.map((v) => h("option", { value: `w:${v}` }, `${v} nm (${devices.filter((d) => d.resist_min_width_nm != null && Math.round(d.resist_min_width_nm / 10) * 10 === v).length})`))) : null);
   const groupSel = h("select", {}, h("option", { value: "" }, "All groups"), groups.map((g) => h("option", { value: g }, g)));
   const kindSel = h("select", {}, h("option", { value: "" }, "All kinds"), kinds.map((k) => h("option", { value: k }, k.replace("_", " "))));
   const textIn = h("input", { type: "search", placeholder: "device name contains…" });
   const openChk = h("input", { type: "checkbox" });
   const onFilter = () => {
-    Object.assign(S.filter, { cd: cdSel.value, group: groupSel.value, kind: kindSel.value, text: textIn.value, open: openChk.checked });
+    Object.assign(S.filter, { cd: cdSel.value, resist: resistSel.value, group: groupSel.value, kind: kindSel.value, text: textIn.value, open: openChk.checked });
     applyFilter();
     if (S.selected && !matchSet().has(S.selected) && filterActive) S.selected = null;
     draw(); drawWafer(); drawPanel();
   };
-  [cdSel, groupSel, kindSel, openChk].forEach((e) => e.addEventListener("change", onFilter));
+  [cdSel, resistSel, groupSel, kindSel, openChk].forEach((e) => e.addEventListener("change", onFilter));
   textIn.addEventListener("input", onFilter);
 
   // ---------- right panel ----------
@@ -467,6 +515,10 @@ export async function renderInspect(root, [bid]) {
           h("dt", {}, "CD"), h("dd", {}, dsel.cd_nm !== null ? `${fmt(dsel.cd_nm)} nm` : "–"),
           h("dt", {}, "Fingers"), h("dd", {}, dsel.n_fingers || "–", dsel.pitch_nm ? ` · pitch ${fmt(dsel.pitch_nm)} nm` : ""),
           h("dt", {}, "Thinnest"), h("dd", {}, `${fmt(dsel.thinnest_nm)} nm`),
+          h("dt", {}, "Resist"), h("dd", {}, dsel.resist_n_thin
+            ? `narrowest ${fmt(dsel.resist_min_width_nm)} nm (mean ${fmt(dsel.resist_mean_width_nm)}) · smallest ${fmt(dsel.resist_min_area_um2, 1)} µm² · longest ${fmt(dsel.resist_max_length_um, 1)} µm · ` +
+              Object.entries(dsel.resist_anchoring).filter(([, n]) => n).map(([k, n]) => `${n} ${k.replace("_", " ")}`).join(", ")
+            : dsel.resist_n_thin === 0 ? "no thin resist" : "–"),
           h("dt", {}, "Position"), h("dd", {}, `${fmt(dsel.center_um[0], 1)}, ${fmt(dsel.center_um[1], 1)} µm`),
           dsel.flags.length ? [h("dt", {}, "Flags"), h("dd", {}, dsel.flags.join(", "))] : null),
         h("div", { class: "status-buttons" },
@@ -490,7 +542,8 @@ export async function renderInspect(root, [bid]) {
         const s = res[d.id]?.status, m = s && state.modeById[s];
         return h("div", { class: d.id === S.selected ? "sel" : "", onclick: () => select(d.id, true) },
           m ? h("span", { class: "swatch", style: { background: m.color } }, m.key.toUpperCase()) : h("span", { class: "swatch none" }),
-          d.id, h("span", { class: "cd" }, d.cd_nm !== null ? `${fmt(d.cd_nm)} nm` : `~${fmt(d.thinnest_nm)}`));
+          d.id, h("span", { class: "cd" }, S.filter.resist && d.resist_min_width_nm != null ? `resist ${fmt(d.resist_min_width_nm)}`
+            : d.cd_nm !== null ? `${fmt(d.cd_nm)} nm` : `~${fmt(d.thinnest_nm)}`));
       }))));
     panel.querySelector(".devlist .sel")?.scrollIntoView({ block: "nearest" });
   }
@@ -543,7 +596,10 @@ export async function renderInspect(root, [bid]) {
         `The reticle was re-extracted after this batch was created.${unknown ? ` ${unknown} recorded result(s) refer to devices that no longer exist and are hidden.` : ""}`) : null,
       waferBox,
       h("div", { class: "filters" },
-        h("label", { class: "field" }, "CD lookup", cdSel),
+        h("label", { class: "field" }, "CD lookup (metal)", cdSel),
+        h("label", { class: "field" }, "Resist lookup (masking)", resistSel),
+        nThin ? h("div", { class: "small muted" }, h("span", { class: "swatch", style: { background: `repeating-linear-gradient(135deg, ${HATCH_COLOR} 0 1.5px, transparent 1.5px 5px)`, border: `1px solid ${HATCH_COLOR}` } }),
+          " hatched = thin resist (narrower than the extraction threshold), drawn when zoomed in") : null,
         h("label", { class: "field" }, "Group", groupSel),
         h("label", { class: "field" }, "Kind", kindSel),
         h("label", { class: "field" }, "Name", textIn),
@@ -553,7 +609,7 @@ export async function renderInspect(root, [bid]) {
 
   applyFilter();
   drawToolbar(); drawWafer(); drawPanel();
-  api.geometry(batch.reticle.id).then((g) => { outlines = g.outlines_um; draw(); })
+  api.geometry(batch.reticle.id).then((g) => { outlines = g.outlines_um; resistOutlines = g.resist_um || null; draw(); })
     .catch(() => toast("No drawn geometry for this reticle; re-extract it to see device shapes when zoomed in", true));
   const ro = new ResizeObserver(resize);
   ro.observe(wrap);

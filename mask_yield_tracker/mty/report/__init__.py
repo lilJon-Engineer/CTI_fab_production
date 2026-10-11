@@ -20,15 +20,19 @@ def write_report(batch: dict, table: dict, modes: list[dict], out_dir, stem: str
     def dump(name, rows, cols):
         with open(out / f"{stem}_{name}.csv", "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(cols + agg["mode_ids"])
+            w.writerow(cols + [f"n_{m}" for m in agg["mode_ids"]])
             for r in rows:
                 w.writerow([r.get(c) for c in cols] + [r.get("modes", {}).get(m) for m in agg["mode_ids"]])
 
     dump("yield_by_cd_dose", [{**r, "cd": r["key"]} for r in agg["cd_cond"]], ["cd", "dose", "focus"] + yc)
     dump("yield_by_cd_pitch_dose", [{**r, "cd": r["key"]} for r in agg["cdpitch_cond"]], ["cd", "pitch_nm", "dose", "focus"] + yc)
     dump("dies", agg["dies"], ["die", "col", "row", "dose", "focus"] + yc)
+    dump("resist_by_dose", [{**r, "grouping": dim, "bin": r["key"]} for dim in ("width", "area", "anchor")
+                            for r in agg["resist"][dim]["cond"]],
+         ["grouping", "bin", "dose", "focus", "resist_fail", "resist_fail_rate"] + yc)
     with open(out / f"{stem}_results.csv", "w", newline="", encoding="utf-8") as f:
-        cols = ["die", "col", "row", "dose", "focus", "device_id", "name", "group", "kind", "cd_nm", "pitch_nm", "thinnest_nm", "status", "ts"]
+        cols = ["die", "col", "row", "dose", "focus", "device_id", "name", "group", "kind", "cd_nm", "pitch_nm", "thinnest_nm",
+                "resist_min_width_nm", "resist_min_area_um2", "resist_max_length_um", "status", "ts"]
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
         w.writerows(results)

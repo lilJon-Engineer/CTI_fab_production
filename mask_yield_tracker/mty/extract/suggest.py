@@ -76,6 +76,7 @@ def suggest_config(path: str, defaults: dict | None = None) -> dict:
         "geometry": {"ignore_triangles": True, "min_finger_aspect": 5.0, "long_line_um": 100.0,
                      "dense_space_factor": 3.0},
         "pairing": {"min_coverage": 0.5},
+        "resist": {"enabled": True, "drawn": "opening", "thin_um": 2.0, "min_area_um2": 0.05},
     }
     if sd is not None:
         sl, sdt = _main_layer(ly, sd)

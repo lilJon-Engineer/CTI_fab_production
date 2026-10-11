@@ -33,8 +33,10 @@
       "pass": false,
       "color": "#2a78d6",
       "key": "s",
-      "description": "Resist ends up as an isolated line instead of an isolated trench for metallization"
+      "description": "Resist ends up as an isolated line instead of an isolated trench for metallization",
+      "resist": true
     }
   ],
-  "_colors": "Colors validated as a set (all-pairs, light surface). Every mark also shows its key letter, so status never relies on color alone."
+  "_colors": "Colors validated as a set (all-pairs, light surface). Every mark also shows its key letter, so status never relies on color alone.",
+  "_resist": "Modes with \"resist\": true are resist (masking) failures; the report relates them to the thin resist features."
 }

@@ -81,6 +81,8 @@ batch; *download report* saves it as a single offline `.html` file:
 - yield vs dose per CD as small multiples on a common 0–100 % scale
 - CD × dose heatmap (yield %, devices inspected), and CD + pitch × dose
 - outcome mix per CD
+- thin resist and skating: skating rate vs narrowest resist, smallest resist
+  area and anchoring (each × dose), and metal CD × narrowest resist
 - per-die wafer map and table (dose, focus, coverage, yield, 95 % interval, counts per mode)
 
 Yield = pass / inspected; sites without a result are left out and reported as
@@ -149,6 +151,26 @@ Try it on the synthetic reticle: `python -m mty synthetic` then
   coverage of the gate bbox recorded); otherwise the smallest S/D site covering
   at least `min_coverage` of the gate site. Unpaired sites are flagged.
 
+### Thin resist (masking) features
+
+Metal CD is only half the story: in lift-off the resist left *between* metal
+features can be too narrow and skate. The extractor computes the resist as the
+field minus the drawn openings (`[resist] drawn = "opening"`; use `"resist"`
+for a level where the drawn shapes are the resist), finds every part narrower
+than `thin_um` (default 2 µm) and describes each one by its narrowest width,
+mean width (2·area / perimeter), length, area, and how it is held to the bulk
+resist: an **island** (not connected), **held at one end**, or **held at both
+ends**. Each feature is attributed to the sites whose drawn geometry borders
+it, and every site gets `resist_min_width_nm`, `resist_mean_width_nm`,
+`resist_min_area_um2`, `resist_max_length_um`, `resist_max_aspect`,
+`resist_n_thin`, `resist_anchoring` and the feature list (device table v2).
+
+In the app, *Resist lookup* highlights devices by narrowest resist (or all
+with thin resist / islands), and zoomed-in devices show thin resist hatched.
+The report relates resist failures (failure modes with `"resist": true` in
+`config/failure_modes.json`, i.e. skating) to narrowest resist, smallest resist
+area and anchoring, each against dose, plus a metal CD × resist table.
+
 ### Flags
 
 | flag | meaning |
@@ -160,6 +182,8 @@ Try it on the synthetic reticle: `python -m mty synthetic` then
 | `collinear_fingers` | several finger segments share one axis position |
 | `narrower_single_line_present` | a narrower single line exists next to the finger array |
 | `mixed_widths` | long line / other site drawn with several widths (thinnest is reported) |
+| `thin_resist` | resist narrower than `[resist] thin_um` borders this site |
+| `resist_island` | one of those resist features is an island (not connected to the bulk resist) |
 
 ## Files
 
@@ -167,7 +191,7 @@ Try it on the synthetic reticle: `python -m mty synthetic` then
 config/reticle.example.toml       config template (synthetic values)
 config/failure_modes.json         pass / lifting / missing / skating (extend here)
 config/batch_meta.json            batch metadata fields (extend here)
-schemas/device_table.v1.schema.json
+schemas/device_table.v2.schema.json (v1 kept for reference)
 schemas/batch.v1.schema.json
 mty/server.py                     local web server + JSON API (stdlib only)
 mty/workspace.py                  on-disk workspace (reticles, batches)
@@ -180,6 +204,7 @@ mty/config.py                     config loading + validation
 mty/extract/sites.py              hierarchy walk, groups, splitting, text exclusion
 mty/extract/geometry.py           CD / fingers / pitch / thinnest dimension
 mty/extract/extractor.py          pairing, ids, JSON/CSV output, summary
+mty/extract/resist.py             thin resist features (width, area, anchoring)
 mty/extract/listing.py            `mty list`
 mty/synthetic.py                  synthetic two-reticle GDS for tests
 tests/                            pytest suite (synthetic data only)

@@ -13,10 +13,11 @@ import klayout.db as db
 from .. import __version__
 from ..config import Config
 from .geometry import analyze
+from .resist import find_thin_resist, site_features, summarize
 from .sites import RawSite, find_sites
 
 DEVICE_TABLE_SCHEMA = "mty.device_table"
-DEVICE_TABLE_VERSION = 1
+DEVICE_TABLE_VERSION = 2   # v2: resist_* fields (thin masking features)
 
 
 def sha256(path: Path) -> str:
@@ -74,8 +75,9 @@ def _pair(name: str, gate_box: db.Box, sd_sites: list[tuple[RawSite, db.Box]], m
 
 
 def extract(reticle: str | Path, cfg: Config, geometry: dict | None = None) -> dict:
-    """Build the device table. If `geometry` is a dict it is filled with
-    {device_id: [[x0, y0, x1, y1, ...] per polygon, in um]} for display."""
+    """Build the device table. If `geometry` is a dict it is filled for display with
+    {"outlines": {device_id: [[x0, y0, x1, y1, ...] per polygon, um]},
+     "resist":   {device_id: [...thin resist features, same format]}}."""
     reticle = Path(reticle)
     cache: dict = {}
     gate_path = Path(cfg.gate.file) if cfg.gate.file else reticle
@@ -85,6 +87,13 @@ def extract(reticle: str | Path, cfg: Config, geometry: dict | None = None) -> d
     geo = cfg.geometry
 
     gate_sites = find_sites(gate_ly, cfg.gate, cfg)
+
+    features = []
+    if cfg.resist.enabled:
+        top = gate_ly.cell(cfg.gate.top_cell)
+        drawn = db.Region(top.begin_shapes_rec(gate_ly.find_layer(cfg.gate.layer, cfg.gate.datatype)))
+        drawn.merge()
+        features = find_thin_resist(drawn, top.bbox(), um, cfg.resist)
 
     sd_sites: list[tuple[RawSite, db.Box]] = []
     sd_path = None
@@ -112,8 +121,16 @@ def extract(reticle: str | Path, cfg: Config, geometry: dict | None = None) -> d
                     flags.append("sd_name_differs_from_gate")
         b = g.bbox
         outlines = [[round(v * um, 4) for pt in p.outline for v in pt] for p in s.prims if p.outline]
+        r_idx = site_features(s.prims, features) if cfg.resist.enabled else []
+        r_out = [[round(v * um, 4) for pt in features[i].poly.each_point_hull() for v in (pt.x, pt.y)] for i in r_idx]
+        rsum = summarize(r_idx, features, um)
+        if rsum["resist_n_thin"]:
+            flags.append("thin_resist")
+            if rsum["resist_anchoring"]["island"]:
+                flags.append("resist_island")
         devices.append({
             "_outlines": outlines,
+            "_resist": r_out,
             "name": name,
             "group": s.group,
             "gate_cell": s.cell,
@@ -132,6 +149,7 @@ def extract(reticle: str | Path, cfg: Config, geometry: dict | None = None) -> d
             "density": g.density,
             "thinnest_nm": None if g.thinnest_dbu is None else round(g.thinnest_dbu * nm, 2),
             "widths_nm": {str(round(w * nm, 2)): n for w, n in sorted(g.widths.items())},
+            **rsum,
             "flags": flags,
         })
 
@@ -147,9 +165,10 @@ def extract(reticle: str | Path, cfg: Config, geometry: dict | None = None) -> d
             d["id"] = f"{name}#{i}"
     devices.sort(key=lambda d: (d["group"], d["name"], d["placement"]))
     for d in devices:
-        outlines = d.pop("_outlines")
+        outlines, resist = d.pop("_outlines"), d.pop("_resist")
         if geometry is not None:
-            geometry[d["id"]] = outlines
+            geometry.setdefault("outlines", {})[d["id"]] = outlines
+            geometry.setdefault("resist", {})[d["id"]] = resist
     devices = [{"id": d.pop("id"), **d} for d in devices]
 
     top = gate_ly.cell(cfg.gate.top_cell)
@@ -175,6 +194,8 @@ def extract(reticle: str | Path, cfg: Config, geometry: dict | None = None) -> d
 
 CSV_COLUMNS = ["id", "name", "group", "kind", "cd_nm", "n_fingers", "pitch_nm", "density", "orientation",
                "thinnest_nm", "center_x_um", "center_y_um", "x0_um", "y0_um", "x1_um", "y1_um",
+               "resist_min_width_nm", "resist_mean_width_nm", "resist_min_area_um2", "resist_max_length_um",
+               "resist_max_aspect", "resist_n_thin", "resist_islands", "resist_one_end", "resist_both_ends",
                "gate_cell", "parent_cell", "sd_name", "sd_cell", "sd_match", "sd_coverage", "widths_nm", "flags"]
 
 
@@ -183,9 +204,10 @@ def write_outputs(table: dict, out_dir: str | Path, stem: str = "device_table",
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     if geometry is not None:
-        (out / "geometry.json").write_text(json.dumps({"schema": "mty.geometry", "version": 1,
+        (out / "geometry.json").write_text(json.dumps({"schema": "mty.geometry", "version": 2,
                                                        "device_table_created": table["created"],
-                                                       "outlines_um": geometry}), encoding="utf-8")
+                                                       "outlines_um": geometry.get("outlines", {}),
+                                                       "resist_um": geometry.get("resist", {})}), encoding="utf-8")
     jp, cp = out / f"{stem}.json", out / f"{stem}.csv"
     jp.write_text(json.dumps(table, indent=1), encoding="utf-8")
     with open(cp, "w", newline="", encoding="utf-8") as f:
@@ -195,6 +217,9 @@ def write_outputs(table: dict, out_dir: str | Path, stem: str = "device_table",
             x0, y0, x1, y1 = d["bbox_um"]
             w.writerow([d["id"], d["name"], d["group"], d["kind"], d["cd_nm"], d["n_fingers"], d["pitch_nm"],
                         d["density"], d["orientation"], d["thinnest_nm"], *d["center_um"], x0, y0, x1, y1,
+                        d["resist_min_width_nm"], d["resist_mean_width_nm"], d["resist_min_area_um2"],
+                        d["resist_max_length_um"], d["resist_max_aspect"], d["resist_n_thin"],
+                        *(d["resist_anchoring"][k] for k in ("island", "one_end", "both_ends")),
                         d["gate_cell"], d["parent_cell"], d["sd_name"], d["sd_cell"], d["sd_match"], d["sd_coverage"],
                         ";".join(f"{k}x{v}" for k, v in d["widths_nm"].items()), ";".join(d["flags"])])
     return jp, cp
@@ -220,6 +245,14 @@ def summary(table: dict) -> str:
         th = Counter((d["kind"], d["thinnest_nm"]) for d in other)
         for (k, t), n in sorted(th.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
             lines.append(f"  {k:14s} {t!s:>9} nm  {n:5d}")
+    thin = [d for d in ds if d.get("resist_n_thin")]
+    if thin:
+        lines.append("")
+        lines.append(f"Sites with thin resist (narrower than the [resist] threshold): {len(thin)}")
+        bins = Counter(round(d["resist_min_width_nm"], -1) for d in thin)
+        for w, n in sorted(bins.items()):
+            isl = sum(1 for d in thin if round(d["resist_min_width_nm"], -1) == w and d["resist_anchoring"]["island"])
+            lines.append(f"  narrowest resist {w:7.0f} nm  {n:5d} sites" + (f"   ({isl} with islands)" if isl else ""))
     flags = Counter(f for d in ds for f in d["flags"])
     if flags:
         lines.append("")

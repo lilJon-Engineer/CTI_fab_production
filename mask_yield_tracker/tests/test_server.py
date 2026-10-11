@@ -43,7 +43,7 @@ def upload_and_extract(srv, gds):
     assert "top_cell = 'SYN_top_Gate'" in d["config"]           # suggested config
     s, d = req(srv, "POST", f"/api/reticles/{rid}/extract")
     assert s == 200, d
-    assert d["meta"]["extracted"]["n_devices"] == 12
+    assert d["meta"]["extracted"]["n_devices"] == 13
     return rid
 
 
@@ -53,7 +53,7 @@ def test_full_flow(server, synthetic_gds):
 
     rid = upload_and_extract(server, synthetic_gds)
     s, table = req(server, "GET", f"/api/reticles/{rid}/devices")
-    assert s == 200 and len(table["devices"]) == 12
+    assert s == 200 and len(table["devices"]) == 13
     s, geo = req(server, "GET", f"/api/reticles/{rid}/geometry")
     assert s == 200 and set(geo["outlines_um"]) == {d["id"] for d in table["devices"]}
 

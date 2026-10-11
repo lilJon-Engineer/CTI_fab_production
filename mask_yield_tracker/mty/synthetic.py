@@ -116,6 +116,20 @@ class _Builder:
             # a text cell directly in the container must not become a site
         self.place(cut["_Gate"], self.text("Q", "_Gate", self.g), 2000 * UM, 4500 * UM)
 
+        # --- Resist test structure: wide metal strips with narrow resist lines between them
+        #     (0.8 um resist, 80 um long, anchored at one end) and a metal ring around a resist island.
+        rg, rs = self.cell("XR01_Gate"), self.cell("XR01_SD")
+        for k in range(4):
+            x = k * 2800                                     # 2 um metal, 0.8 um resist gaps
+            rg.shapes(self.g).insert(db.Box(x, 0, x + 2000, 80 * UM))
+        rg.shapes(self.g).insert(db.Box(-1000, 80 * UM, 4 * 2800 + 1000, 84 * UM))   # bus closes the top end
+        ring = db.Region(db.Box(20 * UM, 0, 26 * UM, 9 * UM)) - db.Region(db.Box(22 * UM, 2 * UM, 23 * UM, 7 * UM))
+        for poly in ring.each():
+            rg.shapes(self.g).insert(poly)                   # 1 x 5 um resist island inside a metal ring
+        rs.shapes(self.s).insert(db.Box(-10 * UM, -10 * UM, 40 * UM, 95 * UM))
+        self.place(cut["_Gate"], rg, 1200 * UM, 4000 * UM)
+        self.place(cut["_SD"], rs, 1200 * UM, 4000 * UM)
+
         # --- PCM block: one PCM cell, rotated 270, with sub-devices, pads, long lines
         pg, ps = self.cell("PCMA_01_Gate"), self.cell("PCMA_01_SD")
         frame_g, frame_s = self.cell("PCM_frame_A_Gate"), self.cell("PCM_frame_A_SD")
@@ -165,6 +179,7 @@ class _Builder:
 
 # Expected extraction results, used by the tests.
 EXPECTED_SITES = {
+    "XR01#1",
     "XA01#1", "XA02#1", "XA03#1", "XA03#2", "XA04#1", "XA04#2", "XA04#3",
     "PCMA_01/SubA#1", "PCMA_01/SubB#1", "PCMA_01/meander#1", "PCMA_01/_wires#1",
     "BARS#1",

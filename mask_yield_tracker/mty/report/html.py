@@ -17,7 +17,8 @@ REPORT_SCHEMA = "mty.report"
 REPORT_VERSION = 1
 DATA_ID = "mty-report-data"
 
-SEQ = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
+SEQ = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]          # yield (blue)
+SEQ_FAIL = ["#fde4d8", "#fbc6ab", "#f7a07b", "#eb6834", "#c8501f", "#9c3c15", "#6e290c"]     # failure rate (orange)
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a"]          # validated all-pairs; more focus values fold to small multiples
 INK, INK2, MUTED, GRID, SURFACE = "#0b0b0b", "#52514e", "#7a7974", "#e4e3df", "#fcfcfb"
 
@@ -43,11 +44,11 @@ def _cond_label(dose, focus, units, focus_varies) -> str:
     return s
 
 
-def _seq(y):
+def _seq(y, ramp=SEQ):
     if y is None:
         return None, INK2
     i = min(6, int(y * 7))
-    return SEQ[i], ("#fff" if i >= 3 else INK)
+    return ramp[i], ("#fff" if i >= 3 else INK)
 
 
 # ---------------------------------------------------------------- charts ----
@@ -162,16 +163,21 @@ def wafer_map(batch: dict, dies: list[dict]) -> str:
     return "".join(out)
 
 
-def legend_seq() -> str:
-    sw = "".join(f'<span class="sw" style="background:{c}"></span>' for c in SEQ)
-    return f'<div class="legend"><span class="sw none"></span> not inspected &nbsp; yield 0% {sw} 100%</div>'
+def legend_seq(metric: str = "yield") -> str:
+    ramp, name = (SEQ, "yield") if metric == "yield" else (SEQ_FAIL, "skating rate")
+    sw = "".join(f'<span class="sw" style="background:{c}"></span>' for c in ramp)
+    return f'<div class="legend"><span class="sw none"></span> not inspected &nbsp; {name} 0% {sw} 100%</div>'
 
 
 # ---------------------------------------------------------------- tables ----
 
 def heat_table(rows_by_key: dict, row_labels: list[tuple[str, str]], conds: list[tuple], cond_labels: list[str],
-               head: str) -> str:
-    """rows_by_key[(rowkey, cond)] -> agg row. Cells show yield % and n; colour = yield."""
+               head: str, metric: str = "yield") -> str:
+    """rows_by_key[(rowkey, cond)] -> agg row. Cells show the metric in % and n inspected.
+    metric "yield" (blue ramp) or "resist_fail_rate" (orange ramp)."""
+    num_key = "pass" if metric == "yield" else "resist_fail"
+    ramp = SEQ if metric == "yield" else SEQ_FAIL
+    what = "pass" if metric == "yield" else "skating"
     out = ['<div class="scroll"><table class="heat"><thead><tr>', f'<th>{_e(head)}</th>']
     out += [f'<th>{_e(lbl)}</th>' for lbl in cond_labels]
     out.append("<th>all</th></tr></thead><tbody>")
@@ -183,13 +189,15 @@ def heat_table(rows_by_key: dict, row_labels: list[tuple[str, str]], conds: list
             if r is None or not r["inspected"]:
                 out.append('<td class="na">–</td>')
                 continue
-            tot_p += r["pass"]
+            tot_p += r[num_key]
             tot_n += r["inspected"]
-            fill, ink = _seq(r["yield"])
-            tip = f'{rl} @ {c[0]}: {r["pass"]}/{r["inspected"]} pass, 95% CI {_pct(r["yield_lo"])}–{_pct(r["yield_hi"])}, coverage {_pct(r["coverage"])}'
-            out.append(f'<td style="background:{fill};color:{ink}" title="{_e(tip)}">{round(100 * r["yield"])}<small>{r["inspected"]}</small></td>')
+            v = r[metric]
+            fill, ink = _seq(v, ramp)
+            tip = (f'{rl} @ dose {_num(c[0])}: {r[num_key]}/{r["inspected"]} {what}; yield {_pct(r["yield"])} '
+                   f'(95% CI {_pct(r["yield_lo"])}–{_pct(r["yield_hi"])}), coverage {_pct(r["coverage"])}')
+            out.append(f'<td style="background:{fill};color:{ink}" title="{_e(tip)}">{round(100 * v)}<small>{r["inspected"]}</small></td>')
         y = tot_p / tot_n if tot_n else None
-        fill, ink = _seq(y)
+        fill, ink = _seq(y, ramp)
         out.append(f'<td style="background:{fill or "transparent"};color:{ink}" class="tot">{_pct(y)}<small>{tot_n or ""}</small></td></tr>')
     out.append("</tbody></table></div>")
     return "".join(out)
@@ -262,13 +270,19 @@ function save(name, text) {
   a.download = name; document.body.append(a); a.click(); a.remove();
 }
 const A = DATA.aggregates, modes = A.mode_ids, base = DATA.batch.id;
-const flat = (rows) => rows.map((r) => Object.assign({}, r, Object.fromEntries(modes.map((m) => [m, r.modes[m]]))));
+const mc = modes.map((m) => "n_" + m);    // per-mode counts (named apart from the "pass" total)
+const flat = (rows) => rows.map((r) => Object.assign({}, r, Object.fromEntries(modes.map((m) => ["n_" + m, r.modes[m]]))));
 const yc = ["sites", "inspected", "pass", "yield", "yield_lo", "yield_hi", "coverage"];
 document.getElementById("csv-cd").onclick = () => save(base + "_yield_by_cd_dose.csv",
-  csv(flat(A.cd_cond).map((r) => Object.assign(r, { cd: r.key })), ["cd", "dose", "focus", ...yc, ...modes]));
+  csv(flat(A.cd_cond).map((r) => Object.assign(r, { cd: r.key })), ["cd", "dose", "focus", ...yc, ...mc]));
 document.getElementById("csv-cdp").onclick = () => save(base + "_yield_by_cd_pitch_dose.csv",
-  csv(flat(A.cdpitch_cond).map((r) => Object.assign(r, { cd: r.key })), ["cd", "pitch_nm", "dose", "focus", ...yc, ...modes]));
-document.getElementById("csv-die").onclick = () => save(base + "_dies.csv", csv(flat(A.dies), ["die", "col", "row", "dose", "focus", ...yc, ...modes]));
+  csv(flat(A.cdpitch_cond).map((r) => Object.assign(r, { cd: r.key })), ["cd", "pitch_nm", "dose", "focus", ...yc, ...mc]));
+document.getElementById("csv-resist").onclick = () => {
+  const rows = [];
+  for (const dim of ["width", "area", "anchor"]) for (const r of flat(A.resist?.[dim]?.cond || [])) rows.push(Object.assign({ grouping: dim, bin: r.key }, r));
+  save(base + "_resist_by_dose.csv", csv(rows, ["grouping", "bin", "dose", "focus", "resist_fail", "resist_fail_rate", ...yc, ...mc]));
+};
+document.getElementById("csv-die").onclick = () => save(base + "_dies.csv", csv(flat(A.dies), ["die", "col", "row", "dose", "focus", ...yc, ...mc]));
 function resultRows() {
   const dev = Object.fromEntries(DATA.device_table.devices.map((d) => [d.id, d]));
   const sp = DATA.batch.splits, rows = [];
@@ -279,13 +293,14 @@ function resultRows() {
     for (const id of Object.keys(DATA.batch.results[key]).sort()) {
       const d = dev[id] || {}, res = DATA.batch.results[key][id];
       rows.push({ die: key, col, row, dose: c.dose ?? null, focus, device_id: id, name: d.name, group: d.group, kind: d.kind,
-        cd_nm: d.cd_nm, pitch_nm: d.pitch_nm, thinnest_nm: d.thinnest_nm, status: res.status, ts: res.ts });
+        cd_nm: d.cd_nm, pitch_nm: d.pitch_nm, thinnest_nm: d.thinnest_nm, resist_min_width_nm: d.resist_min_width_nm,
+        resist_min_area_um2: d.resist_min_area_um2, resist_max_length_um: d.resist_max_length_um, status: res.status, ts: res.ts });
     }
   }
   return rows;
 }
 document.getElementById("csv-res").onclick = () => save(base + "_results.csv",
-  csv(resultRows(), ["die", "col", "row", "dose", "focus", "device_id", "name", "group", "kind", "cd_nm", "pitch_nm", "thinnest_nm", "status", "ts"]));
+  csv(resultRows(), ["die", "col", "row", "dose", "focus", "device_id", "name", "group", "kind", "cd_nm", "pitch_nm", "thinnest_nm", "resist_min_width_nm", "resist_min_area_um2", "resist_max_length_um", "status", "ts"]));
 """
 
 
@@ -340,6 +355,8 @@ def build_report(batch: dict, table: dict, modes: list[dict]) -> str:
                                  for lbl, c in zip(cond_labels, agg["conditions"])],
                                 modes, "Outcome by dose (share of inspected, all devices)", label_w=130, w=1100)
 
+    resist_html = resist_section(agg, table, conds, cond_labels, fv)
+
     t = agg["total"]
     tiles = [("Dies", len(batch["wafer"]["dies"])), ("Results recorded", f'{t["inspected"]} / {t["sites"]}'),
              ("Coverage", _pct(t["coverage"], 1)), ("Overall yield", _pct(t["yield"], 1))]
@@ -347,7 +364,8 @@ def build_report(batch: dict, table: dict, modes: list[dict]) -> str:
     data = {"schema": REPORT_SCHEMA, "version": REPORT_VERSION, "generated": generated, "generator": f"mty {__version__}",
             "batch": batch, "failure_modes": modes,
             "device_table": {"created": table.get("created"), "source": {k: table["source"].get(k) for k in ("gate_file", "gate_sha256", "sd_file")},
-                             "devices": [{k: d.get(k) for k in ("id", "name", "group", "kind", "cd_nm", "pitch_nm", "thinnest_nm")} for d in table["devices"]]},
+                             "devices": [{k: d.get(k) for k in ("id", "name", "group", "kind", "cd_nm", "pitch_nm", "thinnest_nm", "resist_min_width_nm",
+                                      "resist_min_area_um2", "resist_max_length_um", "resist_n_thin")} for d in table["devices"]]},
             "aggregates": agg}
     payload = json.dumps(data, separators=(",", ":")).replace("<", "\\u003c")  # safe inside <script>
     warn = (f'<p class="small" style="color:#d03b3b">{agg["unknown_results"]} recorded result(s) refer to devices that are not in the current device table and are not counted.</p>'
@@ -363,7 +381,7 @@ def build_report(batch: dict, table: dict, modes: list[dict]) -> str:
 <div class="tiles">{"".join(f'<div class="tile"><div class="v">{_e(v)}</div><div class="l">{_e(k)}</div></div>' for k, v in tiles)}</div>
 <div class="card"><dl class="meta">{meta_rows}<dt>Dose unit</dt><dd>{_e(units["dose_unit"])}</dd>{f'<dt>Focus unit</dt><dd>{_e(units["focus_unit"])}</dd>' if fv else ""}</dl>{warn}
 <p class="small muted">Yield = pass / inspected. Sites without a recorded result are not counted; coverage = inspected / sites. Hover a point or cell for counts and the 95% Wilson interval. Survival does not mean the CD printed on target.</p>
-<div class="actions"><button onclick="window.print()">Print / save as PDF</button><button id="csv-cd">CSV: yield by CD × dose</button><button id="csv-cdp">CSV: yield by CD + pitch × dose</button><button id="csv-die">CSV: per die</button><button id="csv-res">CSV: all results</button></div>
+<div class="actions"><button onclick="window.print()">Print / save as PDF</button><button id="csv-cd">CSV: yield by CD × dose</button><button id="csv-cdp">CSV: yield by CD + pitch × dose</button><button id="csv-resist">CSV: skating by resist × dose</button><button id="csv-die">CSV: per die</button><button id="csv-res">CSV: all results</button></div>
 <p class="small muted">To reopen this report in the app: Batches → Import batch… and choose this file.</p></div>
 
 <h2>Yield vs dose, all devices</h2>
@@ -381,6 +399,8 @@ def build_report(batch: dict, table: dict, modes: list[dict]) -> str:
 <h2>Failure modes</h2>
 <div class="card">{mode_by_cd}</div>
 
+{resist_html}
+
 <h2>Per die</h2>
 <div class="wafer-wrap"><div class="card">{wafer_map(batch, agg["dies"])}{legend_seq()}<p class="small muted">Column header = dose. Number = yield %.</p></div>
 <div class="card">{die_table(agg["dies"], modes, units, fv)}</div></div>
@@ -389,6 +409,60 @@ def build_report(batch: dict, table: dict, modes: list[dict]) -> str:
 <script>{JS}</script>
 </body></html>
 """
+
+
+def resist_section(agg: dict, table: dict, conds, cond_labels, fv) -> str:
+    """Skating vs the masking resist: narrowest width, smallest area, how it is held."""
+    R = agg.get("resist")
+    rcfg = (table.get("source", {}).get("config") or {}).get("resist", {})
+    thin_um = rcfg.get("thin_um", 2.0)
+    drawn = rcfg.get("drawn", "opening")
+    modes_txt = ", ".join(agg.get("resist_mode_ids") or []) or "none"
+    head = (f'<h2>Thin resist and skating</h2><p class="small muted">Resist (masking) features narrower than {thin_um:g} µm, '
+            f'found between the drawn {"openings" if drawn == "opening" else "resist shapes"}. Each device is grouped by its '
+            f'narrowest resist feature, its smallest resist area, and how its thin resist is held to the bulk resist. '
+            f'Cells show the share of inspected devices that failed with a resist mode ({_e(modes_txt)}); hover for counts and yield.</p>')
+    if not R or all(b["key"] == "none" for b in R["width"]["bins"]):
+        return head + '<p class="muted">No thin resist features in this device table (re-extract with a current version to add them).</p>'
+    parts = [head]
+    titles = {"width": ("Narrowest resist × dose", "Narrowest resist"),
+              "area": ("Smallest resist area × dose", "Smallest resist area"),
+              "anchor": ("How the thin resist is held × dose", "Thin resist")}
+    for dim in ("width", "area", "anchor"):
+        rows = {(r["key"], (r["dose"], r["focus"])): r for r in R[dim]["cond"]}
+        labels = [(b["key"], f'{b["label"]} ({b["n_devices"]})') for b in R[dim]["bins"]]
+        parts.append(f'<h3>{titles[dim][0]}</h3><div class="card">'
+                     f'{heat_table(rows, labels, conds, cond_labels, titles[dim][1] + " \\ dose", metric="resist_fail_rate")}'
+                     f'{legend_seq("fail")}</div>')
+    # metal CD x narrowest resist, all doses
+    cds = []
+    rws = []
+    for r in R["cd_width"]:
+        if r["cd"] not in cds:
+            cds.append(r["cd"])
+        if r["rw"] not in rws:
+            rws.append(r["rw"])
+    rws.sort(key=lambda k: (k == "none", float(k[3:]) if k != "none" else 0))
+    by = {(r["cd"], r["rw"]): r for r in R["cd_width"]}
+    out = ['<h3>Metal CD × narrowest resist (all doses)</h3><div class="card"><div class="scroll"><table class="heat"><thead><tr><th>CD \\ resist</th>']
+    out += [f'<th>{_e("none" if k == "none" else k[3:] + " nm")}</th>' for k in rws]
+    out.append("</tr></thead><tbody>")
+    for cd in cds:
+        if not any(by.get((cd, k), {}).get("inspected") for k in rws if k != "none"):
+            continue                                  # only CDs that have thin resist somewhere
+        out.append(f"<tr><th>{_e(cd_short(cd))}</th>")
+        for k in rws:
+            r = by.get((cd, k))
+            if not r or not r["inspected"]:
+                out.append('<td class="na">–</td>')
+                continue
+            fill, ink = _seq(r["resist_fail_rate"], SEQ_FAIL)
+            tip = f'{cd_short(cd)}, resist {k}: {r["resist_fail"]}/{r["inspected"]} skating, yield {_pct(r["yield"])}'
+            out.append(f'<td style="background:{fill};color:{ink}" title="{_e(tip)}">{round(100 * r["resist_fail_rate"])}<small>{r["inspected"]}</small></td>')
+        out.append("</tr>")
+    out.append(f'</tbody></table></div>{legend_seq("fail")}</div>')
+    parts.append("".join(out))
+    return "".join(parts)
 
 
 def defaultdict_rows(rows: list[dict]) -> dict:

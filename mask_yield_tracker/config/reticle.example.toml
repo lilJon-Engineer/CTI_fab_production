@@ -66,3 +66,11 @@ dense_space_factor = 3.0     # space >= factor * CD  -> isolated, else dense (pr
 
 [pairing]
 min_coverage = 0.5           # fallback pairing: fraction of the gate site bbox the S/D site must cover
+
+[resist]
+# Thin masking resist between drawn features (skating risk).
+enabled = true
+drawn = "opening"            # "opening": drawn shapes are cleared, resist elsewhere (lift-off)
+                             # "resist":  drawn shapes are the resist that stays
+thin_um = 2.0                # resist narrower than this is tracked
+min_area_um2 = 0.05          # ignore corner slivers smaller than this
